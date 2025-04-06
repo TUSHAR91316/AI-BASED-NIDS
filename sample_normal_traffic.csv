@@ -1,0 +1,4 @@
+dur,proto,sbytes,dbytes,sttl,ct_state_ttl,label
+0.0,tcp,100,200,64,1,0
+1.5,udp,300,150,60,2,0
+0.2,tcp,50,60,128,1,0
