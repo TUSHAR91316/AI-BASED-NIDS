@@ -87,7 +87,7 @@ This project provides a simple yet powerful **AI-powered Intrusion Detection Sys
 
 ## 👨‍💻 Author
 
-Built by Tushar and team as part of a **Network Security & Cryptography project**.
+Built by Tushar as part of a **Network Security & Cryptography project**.
 
 ---
 
