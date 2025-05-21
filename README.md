@@ -93,4 +93,4 @@ Built by Tushar as part of a **Network Security & Cryptography project**.
 
 ## 📄 License
 
-This project is for educational use only. Adapt and expand as needed!
+This project is for educational use only. Adapt and expand as needed!.
