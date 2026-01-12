@@ -75,17 +75,41 @@ class FlowFeatureExtractor:
         flow_bytes_s = sum(sizes) / duration if duration > 0 else 0.0
         flow_packets_s = len(packets) / duration if duration > 0 else 0.0
         
+        # Flag Counts
+        syn_count = 0
+        ack_count = 0
+        fin_count = 0
+        rst_count = 0
+        psh_count = 0
+        urg_count = 0
+        
+        for p in packets:
+            f = str(p.get('flags', '')) # Convert Scapy FlagValue to string safely
+            if 'S' in f: syn_count += 1
+            if 'A' in f: ack_count += 1
+            if 'F' in f: fin_count += 1
+            if 'R' in f: rst_count += 1
+            if 'P' in f: psh_count += 1
+            if 'U' in f: urg_count += 1
+
         # Compile Vector (Matching the Loader's expectations roughly)
         features = {
             'Flow Duration': duration,
-            'Total Fwd Packets': len(packets), # Simplified (assuming raw flow is unidirectional or we parse dir)
+            'Total Fwd Packets': len(packets), 
             'Packet Length Mean': np.mean(sizes),
             'Packet Length Std': np.std(sizes),
             'Flow Bytes/s': flow_bytes_s,
             'Flow Packets/s': flow_packets_s,
             'Flow IAT Mean': iat_stats['iat_mean'],
             'Flow IAT Std': iat_stats['iat_std'],
-            'Packet Entropy': avg_entropy
+            'Packet Entropy': avg_entropy,
+            # Flags for Rule Engine
+            'SYN Flag Count': syn_count,
+            'ACK Flag Count': ack_count,
+            'FIN Flag Count': fin_count,
+            'RST Flag Count': rst_count,
+            'PSH Flag Count': psh_count,
+            'URG Flag Count': urg_count
         }
         
         return features

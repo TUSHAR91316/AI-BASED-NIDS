@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import joblib
 import tensorflow as tf
-from scapy.all import sniff, IP, TCP, UDP
+from scapy.all import sniff, IP, TCP, UDP, conf
 from collections import deque
 
 # Import Project Modules
@@ -17,8 +17,14 @@ from fusion_engine.fusion import FusionEngine
 from fusion_engine.rule_engine import RuleEngine
 
 class RealTimeDetector:
-    def __init__(self, interface="eth0"):
-        self.interface = interface
+    def __init__(self, interface=None):
+        # Auto-detect interface if not provided
+        if interface is None:
+            self.interface = conf.iface
+            print(f"Auto-detected Interface: {self.interface.name} ({self.interface.ip})")
+        else:
+            self.interface = interface
+            
         self.flow_extractor = FlowFeatureExtractor()
         self.fusion_engine = FusionEngine()
         self.rule_engine = RuleEngine()
@@ -27,10 +33,11 @@ class RealTimeDetector:
         print("Loading Models...")
         try:
             self.scaler = joblib.load(r"g:\Projects\AI-BASED-NIDS\dataset\scaler.save")
-            self.cnn_model = tf.keras.models.load_model(r"g:\Projects\AI-BASED-NIDS\models\cnn_model.h5")
-            self.autoencoder = tf.keras.models.load_model(r"g:\Projects\AI-BASED-NIDS\models\autoencoder\autoencoder.h5")
+            # Load with compile=False to avoid metrics deserialization issues
+            self.cnn_model = tf.keras.models.load_model(r"g:\Projects\AI-BASED-NIDS\models\cnn_model.h5", compile=False)
+            self.autoencoder = tf.keras.models.load_model(r"g:\Projects\AI-BASED-NIDS\models\autoencoder\autoencoder.h5", compile=False)
             # self.iso_forest = joblib.load(r"g:\Projects\AI-BASED-NIDS\models\autoencoder\isolation_forest.joblib")
-            print("Models Loaded Successfully.")
+            print("✅ Models Loaded Successfully.")
         except Exception as e:
             print(f"Warning: Models not found ({e}). Running in Simulation Mode.")
             self.scaler = None
@@ -52,6 +59,9 @@ class RealTimeDetector:
         # Simple Tuple Key
         src = packet[IP].src
         dst = packet[IP].dst
+        # Debug Print (Verify Sniffing)
+        print(f"DEBUG: Pkt {src} -> {dst}") 
+        
         sport = packet[TCP].sport if packet.haslayer(TCP) else (packet[UDP].sport if packet.haslayer(UDP) else 0)
         dport = packet[TCP].dport if packet.haslayer(TCP) else (packet[UDP].dport if packet.haslayer(UDP) else 0)
         proto = packet[IP].proto
@@ -151,5 +161,5 @@ class RealTimeDetector:
         sniff(iface=self.interface, prn=self.process_packet, store=0)
 
 if __name__ == "__main__":
-    detector = RealTimeDetector(interface="eth0") # Change interface as needed (e.g., "Wi-Fi" or "Ethernet")
+    detector = RealTimeDetector() # Auto-detect interface
     detector.start()
