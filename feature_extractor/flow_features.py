@@ -85,6 +85,7 @@ class FlowFeatureExtractor:
         
         for p in packets:
             f = str(p.get('flags', '')) # Convert Scapy FlagValue to string safely
+            print(f"DEBUG: Flag raw: {f}") 
             if 'S' in f: syn_count += 1
             if 'A' in f: ack_count += 1
             if 'F' in f: fin_count += 1

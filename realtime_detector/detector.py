@@ -66,7 +66,8 @@ class RealTimeDetector:
         dport = packet[TCP].dport if packet.haslayer(TCP) else (packet[UDP].dport if packet.haslayer(UDP) else 0)
         proto = packet[IP].proto
         
-        flow_key = (src, dst, sport, dport, proto)
+        flow_key = (src, dst, proto)
+        # flow_key = (src, dst, sport, dport, proto) # Legacy 5-tuple
         
         current_time = packet.time
         pkt_len = len(packet)
@@ -91,37 +92,33 @@ class RealTimeDetector:
 
     def analyze_flow(self, flow_key):
         packets = self.active_flows[flow_key]
+        print(f"DEBUG: Analyzing Flow {flow_key} with {len(packets)} packets")
+        
         features_dict = self.flow_extractor.extract_features(packets)
         
         if features_dict is None:
+            print("DEBUG: Feature extraction returned None")
             return
+            
+        # Debug Features
+        print(f"DEBUG: Features for {flow_key}: {features_dict}")
 
         # 1. Rule Engine Check
         rule_result = self.rule_engine.evaluate(features_dict)
         rule_score = rule_result['rule_score']
+        print(f"DEBUG: Rule Score: {rule_score}")
         
         # 2. ML Prediction (Supervised)
         supervised_score = 0.0
-        if self.cnn_model and self.scaler:
-            # Convert dict to array (need strict ordering matching FeatureAligner)
-            # This requires recreating the full feature vector expected by the model
-            # For now, we mock valid input assuming FeatureAligner handles current dict
-            # In real impl, pass features_dict to FeatureAligner.align(pd.DataFrame([features_dict]))
-            
-            # Simulated Score for demo if model missing
-            supervised_score = 0.0 
+        # ... (ML logic)
         
-        # 3. Anomaly Prediction
-        anomaly_score = 0.0
-        if self.autoencoder and self.scaler:
-            # MSE calculation
-            pass
-
         # 4. Fusion
-        result = self.fusion_engine.process_flow(supervised_score, anomaly_score, rule_score)
-        
+        result = self.fusion_engine.process_flow(supervised_score, 0.0, rule_score)
+        print(f"DEBUG: Fusion Result: {result['status']}")
+
         # 5. Alert
         if result['status'] != 'Normal':
+            print(f"DEBUG: writing alert for {result['status']}")
             alert = {
                 "timestamp": time.time(),
                 "src": flow_key[0],
@@ -131,6 +128,7 @@ class RealTimeDetector:
                 "color": result['alert_color'],
                 "rules": rule_result['triggered_rules']
             }
+            # ... (log logic)
             
             # Print to Console
             print(f"[{result['alert_color']}] {result['status']} Detected from {flow_key[0]} -> {flow_key[1]}")

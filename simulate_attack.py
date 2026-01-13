@@ -10,14 +10,18 @@ def simulate_syn_scan(target_ip="192.168.1.50"):
     print(f"Sending via: {conf.iface.name}")
 
     # Send a burst of SYN packets
-    # Increase count to ensure flow threshold (10) is met and rule (0.8 ratio) triggers
-    for port in range(1000, 1100):
+    # Continuous loop for Real-Time Demo
+    print("♾️ Starting Continuous Attack Simulation...")
+    while True:
+        port = random.randint(1024, 65535)
         # Craft SYN packet
         pkt = IP(dst=target_ip)/TCP(dport=port, flags="S")
         send(pkt, verbose=0)
-        if port % 10 == 0:
-            print(f"Sent SYN batch to port {port}")
-        time.sleep(0.05)
+        
+        if port % 50 == 0:
+             print(f"Stats: Sent packet to port {port}")
+        
+        time.sleep(0.1) # 10 packets per second
     
     print("✅ Attack Simulation Complete.")
 

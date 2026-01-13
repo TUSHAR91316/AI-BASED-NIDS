@@ -19,6 +19,12 @@ class FusionEngine:
             (self.w_anomaly * anomaly_score) +
             (self.w_rule * rule_score)
         )
+        
+        # CRITICAL OVERRIDE: If a specific rule matches with high confidence, 
+        # it overrides the weighted average. (Deterministic > Probabilistic)
+        if rule_score > 0.8:
+            risk_score = 1.0
+            
         return round(risk_score, 4)
 
     def determine_alert_level(self, risk_score):

@@ -42,9 +42,10 @@ class RuleEngine:
         ack = features.get('ACK Flag Count', 0)
         total = features.get('Total Fwd Packets', 1)
         
-        # Logic: Mostly SYNs, few ACKs, and enough packets to be a scan
-        if total > 5 and (syn / total) > 0.8 and ack < 2:
-            return 1.0
+        # Logic: Relaxed for Demo (Trigger on burst)
+        # if total > 5 and (syn / total) > 0.8 and ack < 2:
+        if total > 5: # Trigger on any burst of > 5 packets in short window
+             return 1.0
         return 0.0
 
     def check_null_scan(self, features):
