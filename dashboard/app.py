@@ -132,7 +132,7 @@ st.title("🛡️ AI-BASED NIDS: Cyber Monitor")
 # Sidebar for Actions
 with st.sidebar:
     st.header("Control Panel")
-    app_mode = st.radio("Mode", ["Live Monitor", "File Analysis"])
+    app_mode = st.radio("Mode", ["File Analysis"])
     
     if app_mode == "File Analysis":
         uploaded_file = st.file_uploader("Upload Packet Capture (PCAP) or CSV", type=['pcap', 'pcapng', 'csv'])
@@ -147,72 +147,14 @@ with st.sidebar:
 
 # Main Dashboard View
 
-if app_mode == "Live Monitor" or not uploaded_file:
-    # Auto-refresh loop logic (using st.rerun instead of while True)
-    alerts = load_alerts()
-    
-    # Top Metrics
-    kpi1, kpi2, kpi3 = st.columns(3)
-    
-    total_alerts = len(alerts)
-    high_risk = len([a for a in alerts if a['risk'] > 0.75])
-    medium_risk = len([a for a in alerts if 0.4 <= a['risk'] <= 0.75])
-    
-    kpi1.metric("Total Alerts Detected", total_alerts)
-    kpi2.metric("CRITICAL Threats (Red)", high_risk, delta_color="inverse")
-    kpi3.metric("Suspicious Flows (Yellow)", medium_risk)
-    
-    st.markdown("---")
-    
-    # Main Layout
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.subheader("Recent Alerts")
-        if alerts:
-            for i, alert in enumerate(reversed(alerts[-20:])):
-                # Display Alert
-                status_icon = "🔴" if alert['risk'] > 0.75 else "🟡"
-                with st.expander(f"{status_icon} [{alert['status']}] {alert['src']} -> {alert['dst']}"):
-                    st.write(f"**Timestamp:** {time.ctime(alert['timestamp'])}")
-                    st.write(f"**Risk Score:** {alert['risk']:.4f}")
-                    st.write(f"**Triggered Rules:** {alert['rules']}")
-                    
-                    # Feedback
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        if st.button("✅ Confirm", key=f"conf_{i}"):
-                            st.success("Feedback Logged.")
-                    with c2:
-                        if st.button("❌ False Positive", key=f"fp_{i}"):
-                            st.warning("Feedback Logged.")
-        else:
-            st.info("No alerts in the system log.")
-
-    with col2:
-        st.subheader("Risk Distribution")
-        if alerts:
-            fig = px.pie(values=[high_risk, medium_risk, total_alerts - high_risk - medium_risk], 
-                         names=['Critical', 'Suspicious', 'Low'],
-                         color_discrete_sequence=['#ff2b2b', '#ffbb00', '#00ff41'],
-                         hole=0.4)
-            fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", font={'color': "white"}, showlegend=False)
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.text("Waiting for data...")
-    
-    # XAI Section
-    if alerts and high_risk > 0:
-            last_crit = [a for a in alerts if a['risk'] > 0.75][-1]
-            st.subheader("🔍 Threat Analysis")
-            st.info(f"Analysis for {last_crit['src']} -> {last_crit['dst']}")
-            st.json(last_crit)
-
-    # Refresh Loop
-    time.sleep(2)
-    st.rerun()
+if app_mode == "Live Monitor":
+    st.warning("Live Monitor is currently disabled.")
 
 else:
+    # File Analysis Mode
+    if not uploaded_file:
+        st.info("Please upload a PCAP or CSV file to begin analysis.")
+
     # If in File Analysis mode and file is uploaded/processed, 
     # The user can switch back to Live Monitor to see the inserted alerts,
     # or we can display them here statically.

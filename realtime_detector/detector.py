@@ -155,8 +155,9 @@ class RealTimeDetector:
                 json.dump(data, f, indent=4)
 
     def start(self):
-        print(f"Starting NIDS on {self.interface}...")
-        sniff(iface=self.interface, prn=self.process_packet, store=0)
+        print("Realtime Detection is currently DISABLED per user request.")
+        # print(f"Starting NIDS on {self.interface}...")
+        # sniff(iface=self.interface, prn=self.process_packet, store=0)
 
 if __name__ == "__main__":
     detector = RealTimeDetector() # Auto-detect interface
