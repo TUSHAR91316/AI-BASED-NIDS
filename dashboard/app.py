@@ -8,6 +8,16 @@ import sys
 import tempfile
 from scapy.all import rdpcap, IP, TCP, UDP
 from datetime import datetime
+import socket
+import struct
+
+def int_to_ip(addr):
+    try:
+        if isinstance(addr, str) and '.' in addr:
+            return addr
+        return socket.inet_ntoa(struct.pack("!I", int(addr)))
+    except:
+        return str(addr)
 
 # Add project root to sys.path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -73,7 +83,12 @@ def load_alerts():
         return []
     try:
         with open(ALERT_LOG, 'r') as f:
-            return json.load(f)
+            alerts = json.load(f)
+            # Apply integer to IP conversion safely
+            for a in alerts:
+                if 'src_ip' in a: a['src_ip'] = int_to_ip(a['src_ip'])
+                if 'dst_ip' in a: a['dst_ip'] = int_to_ip(a['dst_ip'])
+            return alerts
     except:
         return []
 
@@ -152,8 +167,8 @@ def process_pcap_file(uploaded_file, detector):
         status_text.text("Analysis Complete!")
         st.success("✅ Analysis Finished.")
         
-        # Explicitly reload alerts
-        st.session_state['refresh'] = True
+        # Force UI refresh to display active results
+        st.rerun()
         
     except Exception as e:
         st.error(f"Error processing PCAP: {e}")
@@ -267,11 +282,6 @@ else:
                  pass
 
     # Display Results if Analysis is Done or Alerts Exist
-    # Auto-refresh logic
-    if st.session_state.get('refresh', False):
-        st.session_state['refresh'] = False
-        # st.experimental_rerun() # Optional
-
     st.markdown("---")
     st.header("🔍 Threat Intelligence Dashboard")
     
@@ -323,5 +333,20 @@ else:
                 height=400
             )
             
+        # 4. GenAI Executive Summary Widget
+        st.markdown("---")
+        st.subheader("🤖 GenAI Executive Threat Report")
+        st.info("Generate a concise, human-readable summary of the current threat landscape using Local AI.")
+        if st.button("Generate Intelligence Report 🧠"):
+            with st.spinner("Analyzing threat patterns and generating report (this may take a minute on first run)..."):
+                try:
+                    from llm_summarizer import ThreatSummarizer
+                    summarizer_instance = ThreatSummarizer()
+                    report = summarizer_instance.generate_summary(alerts)
+                    st.success("Report Generated Successfully:")
+                    st.write(f"> {report}")
+                except Exception as e:
+                    st.error(f"GenAI Integration Error: {e}")
+                    
     else:
         st.info("No threats detected yet. Upload a file to start scanning.")

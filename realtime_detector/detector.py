@@ -37,6 +37,7 @@ class RealTimeDetector:
         self.ae_path = os.path.join(PROJECT_ROOT, "models", "autoencoder", "autoencoder.h5")
         self.ae_threshold_path = os.path.join(PROJECT_ROOT, "models", "autoencoder", "threshold.txt")
         self.scaler_path = os.path.join(PROJECT_ROOT, "models", "scaler.joblib")
+        self.lstm_path = os.path.join(PROJECT_ROOT, "models", "lstm", "lstm_model.h5")
         self.trans_path = os.path.join(PROJECT_ROOT, "models", "transformer", "transformer_model.h5")
         self.iso_path = os.path.join(PROJECT_ROOT, "models", "isolation_forest", "isolation_forest.joblib")
         
@@ -59,55 +60,65 @@ class RealTimeDetector:
 
         # Load Models & Scaler
         print("Loading Models...")
-        try:
-            if os.path.exists(self.scaler_path):
-                self.scaler = joblib.load(self.scaler_path)
-            
-            # Load with compile=False to avoid metrics deserialization issues
-            # Load CNN
-            if os.path.exists(self.model_path):
-                self.cnn_model = keras.models.load_model(self.model_path, compile=False) # Added compile=False
-                print(f"✅ Loaded CNN Model from {self.model_path}")
-            
-            # Load Autoencoder
-            if os.path.exists(self.ae_path):
-                self.autoencoder = keras.models.load_model(self.ae_path, compile=False) # Added compile=False
-                print(f"✅ Loaded Autoencoder from {self.ae_path}")
-                
-            # Load Threshold
-            if os.path.exists(self.ae_threshold_path):
-                with open(self.ae_threshold_path, "r") as f:
-                    self.anomaly_threshold = float(f.read().strip()) # Renamed to anomaly_threshold
-                print(f"✅ Loaded Anomaly Threshold: {self.anomaly_threshold}")
-                
-            # Load LSTM
-            if os.path.exists(self.lstm_path):
-                self.lstm_model = keras.models.load_model(self.lstm_path, compile=False) # Added compile=False
-                print(f"✅ Loaded LSTM Model from {self.lstm_path}")
-                
-            # Load Transformer
-            if os.path.exists(self.trans_path):
-                # Need custom object scope if using custom layers not in standard Keras
-                # Assuming standard layers or saved with trace
-                try:
-                    self.transformer_model = keras.models.load_model(self.trans_path, compile=False) # Added compile=False
-                    print(f"✅ Loaded Transformer Model from {self.trans_path}")
-                except Exception as e:
-                    print(f"⚠️ Could not load Transformer (Custom Layer issue?): {e}")
-
-            # Load Isolation Forest
-            if os.path.exists(self.iso_path):
-                self.iso_forest = joblib.load(self.iso_path)
-                print(f"✅ Loaded Isolation Forest from {self.iso_path}")
-
-            # Load Scaler
-            if os.path.exists(self.scaler_path):
+        
+        # Load Scaler
+        if os.path.exists(self.scaler_path):
+            try:
                 self.scaler = joblib.load(self.scaler_path)
                 print("✅ Loaded Scaler")
-            
-            print("✅ All available models loaded successfully.")
-        except Exception as e:
-            print(f"❌ Error loading models: {e}")
+            except Exception as e:
+                print(f"❌ Error loading Scaler: {e}")
+        
+        # Load CNN
+        if os.path.exists(self.model_path):
+            try:
+                self.cnn_model = keras.models.load_model(self.model_path, compile=False)
+                print(f"✅ Loaded CNN Model from {self.model_path}")
+            except Exception as e:
+                print(f"❌ Error loading CNN: {e}")
+        
+        # Load Autoencoder
+        if os.path.exists(self.ae_path):
+            try:
+                self.autoencoder = keras.models.load_model(self.ae_path, compile=False)
+                print(f"✅ Loaded Autoencoder from {self.ae_path}")
+            except Exception as e:
+                print(f"❌ Error loading Autoencoder: {e}")
+                
+        # Load Threshold
+        if os.path.exists(self.ae_threshold_path):
+            try:
+                with open(self.ae_threshold_path, "r") as f:
+                    self.anomaly_threshold = float(f.read().strip())
+                print(f"✅ Loaded Anomaly Threshold: {self.anomaly_threshold}")
+            except Exception as e:
+                print(f"⚠️ Error loading Anomaly Threshold: {e}")
+                
+        # Load LSTM
+        if os.path.exists(self.lstm_path):
+            try:
+                self.lstm_model = keras.models.load_model(self.lstm_path, compile=False)
+                print(f"✅ Loaded LSTM Model from {self.lstm_path}")
+            except Exception as e:
+                print(f"❌ Error loading LSTM: {e}")
+                
+        # Load Transformer
+        if os.path.exists(self.trans_path):
+            try:
+                self.transformer_model = keras.models.load_model(self.trans_path, compile=False)
+                print(f"✅ Loaded Transformer Model from {self.trans_path}")
+            except Exception as e:
+                print(f"⚠️ Could not load Transformer (Custom Layer issue?): {e}")
+
+        # Load Isolation Forest
+        if os.path.exists(self.iso_path):
+            try:
+                self.iso_forest = joblib.load(self.iso_path)
+                print(f"✅ Loaded Isolation Forest from {self.iso_path}")
+            except Exception as e:
+                print(f"❌ Error loading Isolation Forest: {e}")
+
+        print("✅ Finished model loading phase.")
 
     def get_model_status(self):
         return {

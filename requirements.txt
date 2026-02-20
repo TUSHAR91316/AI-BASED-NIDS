@@ -6,3 +6,6 @@ scapy
 tensorflow
 joblib
 plotly
+transformers
+torch
+openai
