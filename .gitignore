@@ -1,1 +1,19 @@
 *.zip
+*.h5
+*.h6
+*.joblib
+*.pkl
+*.save
+*.pth
+*.parquet
+*.pcap
+*.csv
+
+# Folders
+dataset/
+models/autoencoder/threshold.txt
+__pycache__/
+*.pyc
+
+# Logs
+dashboard/alerts.json
