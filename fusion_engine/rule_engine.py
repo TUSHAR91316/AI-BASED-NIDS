@@ -42,9 +42,8 @@ class RuleEngine:
         ack = features.get('ACK Flag Count', 0)
         total = features.get('Total Fwd Packets', 1)
         
-        # Logic: Relaxed for Demo (Trigger on burst)
-        # if total > 5 and (syn / total) > 0.8 and ack < 2:
-        if total > 5: # Trigger on any burst of > 5 packets in short window
+        # Fix: Trigger ONLY if the vast majority of packets are SYN, and very few are ACK.
+        if total >= 5 and (syn / total) > 0.5 and ack <= 2:
              return 1.0
         return 0.0
 
@@ -64,14 +63,10 @@ class RuleEngine:
         ack = features.get('ACK Flag Count', 0)
         urg = features.get('URG Flag Count', 0)
         
-        # If flow has packets but 0 flags set
-        # (This is tricky with aggregate flow metrics, usually valid for single packet)
-        # For flows, we might see '0' for all flag counts.
-        total_flags = fin + syn + rst + psh + ack + urg
-        total_pkts = features.get('Total Fwd Packets', 0)
-        
-        if total_pkts > 0 and total_flags == 0:
-            return 1.0 
+        # UDP traffic naturally has 0 TCP flags. Since we don't pass the protocol identifier 
+        # into this feature vector, checking for `0 flags` across the board creates 
+        # massive false positives for any normal UDP flow (like DNS or QUIC).
+        # We will disable deterministic Null Scan overriding here to prevent safe traffic banning.
         return 0.0
 
     def check_xmas_scan(self, features):
@@ -97,10 +92,10 @@ class RuleEngine:
         bps = features.get('Flow Bytes/s', 0)
         pps = features.get('Flow Packets/s', 0)
         
-        # Thresholds (Example values, should be tuned or dynamic)
-        if bps > 10_000_000: # 10 MB/s for a single flow is suspicious in many contexts
+        # Thresholds (Tuned down for sample PCAPs)
+        if bps > 1_000_000: # 1 MB/s 
             return 1.0
-        if pps > 10_000: # 10k packets/sec
+        if pps > 500: # 500 packets/sec
             return 1.0
         return 0.0
 
@@ -145,7 +140,7 @@ class RuleEngine:
         return {
             "rule_score": final_score,
             "triggered_rules": triggered,
-            "mitre_ids": [self.rules[r]["mitre"] for r in triggered]
+            "mitre_tactics": [self.rules[r]["mitre"] for r in triggered]
         }
 
 if __name__ == "__main__":

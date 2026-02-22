@@ -6,6 +6,8 @@ import tensorflow as tf
 from tensorflow import keras
 from scapy.all import sniff, IP, TCP, UDP, conf
 from collections import deque
+import json
+from datetime import datetime
 
 # Import Project Modules
 import sys
@@ -153,36 +155,46 @@ class RealTimeDetector:
         if not packet.haslayer(IP):
             return
 
-        # Simple Tuple Key
-        src = str(packet[IP].src)
-        dst = str(packet[IP].dst)
-        proto = packet[IP].proto
-        
-        flow_key = (src, dst, proto)
-        
-        current_time = float(packet.time)
-        pkt_len = len(packet)
-        # Handle Flags safely
-        flags = ""
-        if packet.haslayer(TCP):
-             flags = str(packet[TCP].flags)
-        
-        payload = b""
-        if packet.haslayer(TCP):
-            payload = bytes(packet[TCP].payload)
-        elif packet.haslayer(UDP):
-            payload = bytes(packet[UDP].payload)
+        try:
+            # Simple Tuple Key
+            src = str(packet[IP].src)
+            dst = str(packet[IP].dst)
+            proto = packet[IP].proto
             
-        # Add to Flow Cache
-        if flow_key not in self.active_flows:
-            self.active_flows[flow_key] = []
-        
-        self.active_flows[flow_key].append({
-            'time': current_time,
-            'len': pkt_len,
-            'payload': payload,
-            'flags': flags
-        })
+            flow_key = (src, dst, proto)
+            
+            current_time = float(packet.time)
+            pkt_len = len(packet)
+            
+            # Handle Flags safely
+            flags = ""
+            if packet.haslayer(TCP):
+                 flags = str(packet[TCP].flags)
+            
+            # Extract generic payload after IP layer (handles ICMP, GRE, ESP, etc.)
+            payload = bytes(packet[IP].payload)
+            if packet.haslayer(TCP):
+                payload = bytes(packet[TCP].payload)
+            elif packet.haslayer(UDP):
+                payload = bytes(packet[UDP].payload)
+                
+            # Map proto int to string for readability
+            proto_map = {1: 'ICMP', 2: 'IGMP', 6: 'TCP', 17: 'UDP', 41: 'IPv6', 47: 'GRE', 50: 'ESP', 51: 'AH', 58: 'IPv6-ICMP'}
+            proto_name = proto_map.get(proto, str(proto))
+            flow_key = (src, dst, proto_name)
+            if flow_key not in self.active_flows:
+                self.active_flows[flow_key] = []
+            
+            self.active_flows[flow_key].append({
+                'time': current_time,
+                'len': pkt_len,
+                'payload': payload,
+                'flags': flags
+            })
+        except Exception as e:
+            # Silently log packet parsing errors so the PCAP analysis doesn't halt
+            # print(f"DEBUG: Dropping malformed packet: {e}")
+            return
         
         # Trigger Detection if Flow grows (e.g., > 10 packets)
         if len(self.active_flows[flow_key]) >= 10:
@@ -207,109 +219,130 @@ class RealTimeDetector:
             print("DEBUG: Feature extraction returned None")
             return
             
-        # 1. Rule Engine Check
-        rule_result = self.rule_engine.evaluate(features)
-        rule_score = rule_result['rule_score']
-        rule_desc = rule_result['triggered_rules']
-        rule_tactics = rule_result['mitre_tactics']
-        
-        # 2. AI Model Prediction (Supervised)
-        cnn_prob = 0.0
-        lstm_prob = 0.0
-        trans_prob = 0.0
-        
-        if self.scaler:
-             try:
-                 feature_vector = np.array(list(features.values())).reshape(1, -1)
-                 scaled_features = self.scaler.transform(feature_vector)
-                 
-                 # CNN
-                 if self.cnn_model:
-                     cnn_input = scaled_features.reshape(1, scaled_features.shape[1], 1)
-                     cnn_prob = float(self.cnn_model.predict(cnn_input, verbose=0)[0][0])
+        try:
+            # 1. Rule Engine Check
+            rule_result = self.rule_engine.evaluate(features)
+            rule_score = rule_result['rule_score']
+            rule_desc = rule_result['triggered_rules']
+            rule_tactics = rule_result['mitre_tactics']
+            
+            # 2. AI Model Prediction (Supervised)
+            cnn_prob = 0.0
+            lstm_prob = 0.0
+            trans_prob = 0.0
+            
+            # 3. Anomaly Detection (Unsupervised) defaults
+            anomaly_score = 0.0
+            is_anomaly = False
+            iso_anomaly = False
+            
+            scaled_features = None
+            
+            if self.scaler:
+                 try:
+                     feature_vector = np.array(list(features.values())).reshape(1, -1)
+                     scaled_features = self.scaler.transform(feature_vector)
+                 except Exception as e:
+                     print(f"DEBUG: Scaler Transformation Error (likely feature shape mismatch on this pcap): {e}")
+                     # If we can't scale, we can't run ML models. We will rely purely on Rule Score.
+                     pass
                      
-                 # LSTM
-                 if self.lstm_model:
-                     lstm_input = scaled_features.reshape(1, scaled_features.shape[1], 1)
-                     lstm_prob = float(self.lstm_model.predict(lstm_input, verbose=0)[0][0])
+            if scaled_features is not None:
+                 try:
+                     # CNN
+                     if self.cnn_model:
+                         cnn_input = scaled_features.reshape(1, scaled_features.shape[1], 1)
+                         cnn_prob = float(self.cnn_model.predict(cnn_input, verbose=0)[0][0])
+                         
+                     # LSTM
+                     if self.lstm_model:
+                         lstm_input = scaled_features.reshape(1, scaled_features.shape[1], 1)
+                         lstm_prob = float(self.lstm_model.predict(lstm_input, verbose=0)[0][0])
+                         
+                     # Transformer
+                     if self.transformer_model:
+                         trans_input = scaled_features.reshape(1, scaled_features.shape[1], 1)
+                         trans_prob = float(self.transformer_model.predict(trans_input, verbose=0)[0][0])
+                         
+                 except Exception as e:
+                     print(f"Prediction Error: {e}")
                      
-                 # Transformer
-                 if self.transformer_model:
-                     trans_input = scaled_features.reshape(1, scaled_features.shape[1], 1)
-                     trans_prob = float(self.transformer_model.predict(trans_input, verbose=0)[0][0])
-                     
-             except Exception as e:
-                 print(f"Prediction Error: {e}")
-        
-        # 3. Anomaly Detection (Unsupervised)
-        anomaly_score = 0.0
-        is_anomaly = False
-        iso_anomaly = False
-        
-        if self.autoencoder and self.scaler:
-            try:
-                scaled_features = self.scaler.transform(feature_vector)
-                reconstruction = self.autoencoder.predict(scaled_features, verbose=0)
-                mse = np.mean(np.power(scaled_features - reconstruction, 2))
-                anomaly_score = float(mse)
-                if anomaly_score > self.anomaly_threshold:
-                    is_anomaly = True
-            except Exception as e:
-                print(f"Autoencoder Error: {e}")
-                
-        if self.iso_forest and self.scaler:
-             try:
-                 scaled_features = self.scaler.transform(feature_vector)
-                 iso_pred = self.iso_forest.predict(scaled_features)[0]
-                 if iso_pred == -1:
-                     iso_anomaly = True
-             except Exception as e:
-                 print(f"Isolation Forest Error: {e}")
-        
-                
+                 # Autoencoder Anomaly
+                 if self.autoencoder:
+                     try:
+                         reconstruction = self.autoencoder.predict(scaled_features, verbose=0)
+                         mse = np.mean(np.power(scaled_features - reconstruction, 2))
+                         anomaly_score = float(mse)
+                         if anomaly_score > self.anomaly_threshold:
+                             is_anomaly = True
+                     except Exception as e:
+                         print(f"Autoencoder Error: {e}")
+                         
+                 # Isolation Forest Anomaly
+                 if self.iso_forest:
+                     try:
+                         iso_pred = self.iso_forest.predict(scaled_features)[0]
+                         if iso_pred == -1:
+                             iso_anomaly = True
+                     except Exception as e:
+                         print(f"Isolation Forest Error: {e}")
+            
+                    
 
-        # 4. Fusion
-        # Simple weighted average of available supervised models
-        combined_ai_prob = 0.0
-        count = 0
-        if self.cnn_model:
-            combined_ai_prob += cnn_prob
-            count += 1
-        if self.lstm_model:
-            combined_ai_prob += lstm_prob
-            count += 1
-        if self.transformer_model:
-            combined_ai_prob += trans_prob
-            count += 1
-        
-        final_ai_prob = combined_ai_prob / count if count > 0 else 0.0
-        
-        # Get Fusion Result
-        risk_score, alert_level, alert_color = self.fusion_engine.compute_risk(final_ai_prob, anomaly_score, rule_score, self.anomaly_threshold) # Using self.anomaly_threshold
-        
-        # Override with Isolation Forest if it strongly disagrees? 
-        # Or just log it. For now, let's bump risk if IF says anomaly
-        if iso_anomaly:
-             risk_score = min(100, risk_score + 20)
-             if alert_level == "Low": alert_level = "Medium"
-
-        # 5. Alert
-        if alert_level != "Low" or is_anomaly or iso_anomaly: # Updated condition
-            alert = {
-                "timestamp": str(datetime.now()),
-                "src_ip": packet[IP].src,
-                "dst_ip": packet[IP].dst,
-                "protocol": packet[IP].proto,
-                "risk_score": round(risk_score, 2),
-                "alert_level": alert_level,
-                "ai_confidence": round(final_ai_prob * 100, 2),
-                "anomaly_score": round(anomaly_score, 4),
-                "is_anomaly": is_anomaly,
-                "iso_forest_anomaly": iso_anomaly,
-                "rule_match": rule_desc,
-                "mitre_tactics": rule_tactics
+            # 4. Fusion
+            # Simple weighted average of available supervised models
+            combined_ai_prob = 0.0
+            count = 0
+            if self.cnn_model:
+                combined_ai_prob += cnn_prob
+                count += 1
+            if self.lstm_model:
+                combined_ai_prob += lstm_prob
+                count += 1
+            if self.transformer_model:
+                combined_ai_prob += trans_prob
+                count += 1
+            
+            final_ai_prob = combined_ai_prob / count if count > 0 else 0.0
+            
+            # Get Fusion Result
+            fusion_result = self.fusion_engine.process_flow(final_ai_prob, anomaly_score, rule_score)
+            risk_score = fusion_result['risk_score'] * 100 # Convert 0-1 to 0-100 scale
+            
+            # Determine strict Alert Level mapping
+            status_to_level = {
+                "Malicious/Attack": "Critical" if risk_score >= 90 else "High",
+                "Suspicious": "Medium",
+                "Normal": "Low"
             }
-            self.log_alert(alert) # Call the new log_alert method
+            alert_level = status_to_level.get(fusion_result['status'], "Low")
+            
+            # Override with Anomalies if they strongly disagree
+            if is_anomaly or iso_anomaly:
+                 risk_score = max(85, risk_score + 30)
+                 if alert_level in ["Low", "Medium"]: 
+                     alert_level = "High"
+
+            # 5. Alert
+            if alert_level != "Low" or is_anomaly or iso_anomaly:
+                alert = {
+                    "timestamp": str(datetime.now()),
+                    "src_ip": src_ip,
+                    "dst_ip": dst_ip,
+                    "protocol": proto,
+                    "risk_score": round(risk_score, 2),
+                    "alert_level": alert_level,
+                    "ai_confidence": round(final_ai_prob * 100, 2),
+                    "anomaly_score": round(anomaly_score, 4),
+                    "is_anomaly": is_anomaly,
+                    "iso_forest_anomaly": iso_anomaly,
+                    "rule_match": rule_desc,
+                    "mitre_tactics": rule_tactics
+                }
+                self.log_alert(alert) # Call the new log_alert method
+        except Exception as e:
+            # print(f"DEBUG: Critical error during analyze_flow execution: {e}")
+            pass
             
     def log_alert(self, alert):
         # Print to Console

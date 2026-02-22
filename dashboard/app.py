@@ -237,8 +237,9 @@ with st.sidebar:
         else:
             st.warning("No history found.")
 
+    uploaded_file = None
     if app_mode == "File Analysis":
-        uploaded_file = st.file_uploader("Upload Packet Capture (PCAP)", type=['pcap', 'pcapng'])
+        uploaded_file = st.file_uploader("Upload Packet Capture (PCAP) or Dataset (CSV)", type=['pcap', 'pcapng', 'csv'])
         
         analyze_btn = st.button("Analyze File 🚀")
         
@@ -248,14 +249,21 @@ with st.sidebar:
             if detector:
                 # Show Model Status
                 st.sidebar.markdown("### 🧠 Active AI Models")
-                status = detector.get_model_status()
-                for model_name, is_active in status.items():
-                    if is_active:
-                        st.sidebar.success(f"{model_name}: Active")
-                    else:
-                        st.sidebar.error(f"{model_name}: Inactive")
+                try:
+                    status = detector.get_model_status()
+                    for model_name, is_active in status.items():
+                        if is_active:
+                            st.sidebar.success(f"{model_name}: Active")
+                        else:
+                            st.sidebar.error(f"{model_name}: Inactive")
+                except Exception as e:
+                    pass
                 
-                process_pcap_file(uploaded_file, detector)
+                if uploaded_file.name.endswith('.csv'):
+                    process_csv_file(uploaded_file, detector)
+                else:
+                    process_pcap_file(uploaded_file, detector)
+                    
                 # Set a flag to show results
                 st.session_state['analysis_done'] = True
 
@@ -294,9 +302,47 @@ else:
         high_risk = len([a for a in alerts if a.get('alert_level') in ['High', 'Critical']])
         unique_src = len(set([a.get('src_ip') for a in alerts]))
         
-        col1.metric("Total Alerts", total_alerts)
-        col2.metric("High/Critical Threats", high_risk, delta_color="inverse")
-        col3.metric("Attackers (Source IPs)", unique_src)
+        col1.markdown(f"""
+            <div class="metric-card">
+                <p style="margin-bottom: 0px; font-size: 16px; color: #a3a8b8;">Total Alerts</p>
+                <h2 style="margin-top: 5px;">{total_alerts}</h2>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col2.markdown(f"""
+            <div class="metric-card">
+                <p style="margin-bottom: 0px; font-size: 16px; color: #a3a8b8;">High/Critical Threats</p>
+                <h2 style="margin-top: 5px; color: #ff4b4b !important;">{high_risk}</h2>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        col3.markdown(f"""
+            <div class="metric-card">
+                <p style="margin-bottom: 0px; font-size: 16px; color: #a3a8b8;">Attackers (Source IPs)</p>
+                <h2 style="margin-top: 5px;">{unique_src}</h2>
+            </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        
+        # 1.5 Recent Critical Alerts (Cards)
+        critical_alerts = [a for a in alerts if a.get('alert_level') in ['High', 'Critical']]
+        critical_alerts = sorted(critical_alerts, key=lambda x: x.get('timestamp', ''), reverse=True)[:3]
+        
+        if critical_alerts:
+            st.markdown("### 🚨 Recent Critical Threats")
+            cols = st.columns(max(3, len(critical_alerts)))
+            for idx, alt in enumerate(critical_alerts):
+                with cols[idx]:
+                    st.markdown(f"""
+                    <div class="metric-card" style="border-color: #ff4b4b;">
+                        <h4 style="color: #ff4b4b !important; margin-top: 0;">{alt.get('rule_match', 'Unknown Threat')}</h4>
+                        <p style="margin: 2px 0; font-size: 14px;"><b>Source:</b> {alt.get('src_ip', 'N/A')}</p>
+                        <p style="margin: 2px 0; font-size: 14px;"><b>Target:</b> {alt.get('dst_ip', 'N/A')}</p>
+                        <p style="margin: 2px 0; font-size: 12px; color: #a3a8b8;">{alt.get('timestamp', '')}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True)
         
         # 2. Visualizations
         c1, c2 = st.columns(2)
@@ -343,10 +389,13 @@ else:
                     from llm_summarizer import ThreatSummarizer
                     summarizer_instance = ThreatSummarizer()
                     report = summarizer_instance.generate_summary(alerts)
-                    st.success("Report Generated Successfully:")
-                    st.write(f"> {report}")
+                    st.session_state['genai_report'] = report
                 except Exception as e:
-                    st.error(f"GenAI Integration Error: {e}")
+                    st.session_state['genai_report'] = f"GenAI Integration Error: {e}"
+        
+        if 'genai_report' in st.session_state:
+            st.success("Report Generated Successfully:")
+            st.write(f"> {st.session_state['genai_report']}")
                     
     else:
         st.info("No threats detected yet. Upload a file to start scanning.")
