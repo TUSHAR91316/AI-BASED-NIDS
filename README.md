@@ -52,4 +52,5 @@ The following table highlights why this project is a significant upgrade over th
 *   `feature_extractor/`: Advanced scripts to calculate Entropy, Flow Duration, and IAT.
 
 ## 👨‍💻 Author
-Developed as an advanced upgrade to standard ML-based NIDS, moving from basic statistical checking to deep packet flow analysis
+Developed as an advanced upgrade to standard ML-based NIDS, moving from basic statistical checking to deep packet flow analysis.
+
