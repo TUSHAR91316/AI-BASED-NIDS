@@ -341,8 +341,9 @@ class RealTimeDetector:
                 }
                 self.log_alert(alert) # Call the new log_alert method
         except Exception as e:
-            # print(f"DEBUG: Critical error during analyze_flow execution: {e}")
-            pass
+            import traceback
+            print(f"DEBUG: Critical error during analyze_flow execution: {e}")
+            traceback.print_exc()
             
     def log_alert(self, alert):
         # Print to Console
