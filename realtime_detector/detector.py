@@ -54,7 +54,6 @@ class RealTimeDetector:
         self.lstm_model = None
         self.transformer_model = None
         self.iso_forest = None
-        self.iso_forest = None
         self.scaler = None
         self.anomaly_threshold = 0.05
         
@@ -278,16 +277,14 @@ class RealTimeDetector:
                      except Exception as e:
                          print(f"Autoencoder Error: {e}")
                          
-                 # Isolation Forest Anomaly
-                 if self.iso_forest:
-                     try:
-                         iso_pred = self.iso_forest.predict(scaled_features)[0]
-                         if iso_pred == -1:
-                             iso_anomaly = True
-                     except Exception as e:
-                         print(f"Isolation Forest Error: {e}")
-            
-                    
+             # Isolation Forest Anomaly
+             if self.iso_forest:
+                 try:
+                     iso_pred = self.iso_forest.predict(scaled_features)[0]
+                     if iso_pred == -1:
+                         iso_anomaly = True
+                 except Exception as e:
+                     print(f"Isolation Forest Error: {e}")
 
             # 4. Fusion
             # Simple weighted average of available supervised models
