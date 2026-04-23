@@ -9,30 +9,80 @@ from tqdm import tqdm
 DATASET_DIR = Path(r"g:\Projects\AI-BASED-NIDS\dataset")
 DATASET_DIR.mkdir(parents=True, exist_ok=True)
 
-# Dataset URLs / Kaggle IDs
+# Dataset URLs / Kaggle IDs - Enhanced with better, more recent datasets
 datasets = {
+    # === PRIMARY DATASETS (High Quality, CIC-IDS Compatible) ===
     "CIC-IDS2017": {
         "type": "kaggle",
-        "id": "dhoogla/cicids2017", # Mirror to avoid 403 on original
-        "folder": "CIC-IDS2017"
+        "id": "dhoogla/cicids2017",
+        "folder": "CIC-IDS2017",
+        "priority": 1,
+        "description": "Classic CIC-IDS2017 with 14 attacks"
     },
     "CSE-CIC-IDS2018": {
         "type": "kaggle",
-        "id": "solarmainframe/ids-intrusion-csv", # A reliable processed version on Kaggle
-        "folder": "CSE-CIC-IDS2018"
+        "id": "solarmainframe/ids-intrusion-csv",
+        "folder": "CSE-CIC-IDS2018",
+        "priority": 1,
+        "description": "Large-scale 10-day dataset with modern attacks"
     },
     "CIC-DDoS2019": {
         "type": "kaggle",
         "id": "cicdataset/cicddos2019",
-        "folder": "CIC-DDoS2019"
+        "folder": "CIC-DDoS2019",
+        "priority": 2,
+        "description": "Specialized DDoS attacks (LDoS, DrDoS)"
     },
-     "UNSW-NB15": {
+    
+    # === MODERN IOT DATASETS (Critical for 2024+ NIDS) ===
+    "CIC-TON-IoT": {
+        "type": "kaggle",
+        "id": "mahmouddaadan/cictoniot-network-intrusion-dataset",
+        "folder": "CIC-TON-IoT",
+        "priority": 1,
+        "description": "IoT/IIoT focused with 9 attack categories"
+    },
+    "CIC-IoT-2023": {
+        "type": "kaggle",
+        "id": "cicdataset/cic-iot-2023-dataset",
+        "folder": "CIC-IoT-2023",
+        "priority": 1,
+        "description": "Latest 2023 dataset with 33 IoT devices, 100+ attack scenarios"
+    },
+    
+    # === BALANCED CLASSIC DATASET ===
+    "NSL-KDD": {
+        "type": "kaggle",
+        "id": "hassan06/nslkdd",
+        "folder": "NSL-KDD",
+        "priority": 2,
+        "description": "Improved KDD'99, balanced classes, no redundant records"
+    },
+    
+    # === SPECIALIZED ATTACK DATASETS ===
+    "CIC-Bell-DNS-2021": {
+        "type": "kaggle",
+        "id": "cicdataset/cic-bell-dns-2021",
+        "folder": "CIC-Bell-DNS-2021",
+        "priority": 3,
+        "description": "DNS tunneling and DGA-based attacks"
+    },
+    "CIC-Darknet2020": {
+        "type": "kaggle",
+        "id": "cicdataset/cicdarknet2020",
+        "folder": "CIC-Darknet2020",
+        "priority": 3,
+        "description": "Darknet traffic classification (Tor, VPN, non-VPN)"
+    },
+    
+    # === EXISTING ===
+    "UNSW-NB15": {
         "type": "kaggle",
         "id": "mrwellsdouglas/unsw-nb15",
-        "folder": "UNSW-NB15"
+        "folder": "UNSW-NB15",
+        "priority": 2,
+        "description": "UNSW-NB15 with 9 modern attack categories"
     }
-    # CTU-13 is tricky as it's often hosted on university servers with varying links.
-    # We will prioritize the main CIC datasets first via Kaggle API which is reliable.
 }
 
 def download_file(url, dest_path):
@@ -69,23 +119,64 @@ def download_kaggle_dataset(dataset_id, dest_folder):
     except subprocess.CalledProcessError as e:
         print(f"Failed to download {dataset_id}: {e}")
 
-def main():
-    print("=== AI-NIDS Dataset Manager ===")
+def download_priority_datasets(max_priority=2, skip_existing=True):
+    """Download datasets by priority level (1=essential, 2=important, 3=specialized)"""
+    print(f"=== AI-NIDS Dataset Manager (Priority <= {max_priority}) ===")
     print(f"Target Directory: {DATASET_DIR}")
+    print()
     
-    for name, info in datasets.items():
-        if (DATASET_DIR / info["folder"]).exists() and any((DATASET_DIR / info["folder"]).iterdir()):
-             print(f"Skipping {name} (Folder exists and is not empty)")
-             continue
+    # Sort by priority
+    sorted_datasets = sorted(datasets.items(), key=lambda x: x[1].get("priority", 99))
+    
+    downloaded = []
+    skipped = []
+    failed = []
+    
+    for name, info in sorted_datasets:
+        priority = info.get("priority", 99)
+        if priority > max_priority:
+            continue
+            
+        print(f"[{priority}] {name}: {info.get('description', 'No description')}")
+        
+        if skip_existing and (DATASET_DIR / info["folder"]).exists() and any((DATASET_DIR / info["folder"]).iterdir()):
+            print(f"   ⚡ Skipping (already exists)")
+            skipped.append(name)
+            continue
 
         if info["type"] == "kaggle":
             download_kaggle_dataset(info["id"], info["folder"])
+            downloaded.append(name)
         elif info["type"] == "direct":
-            # Placeholder for direct generic downloads if needed
             pass
-            
-    print("\nCheck CTU-13 manual download if needed: https://www.stratosphereips.org/datasets-ctu13")
-    print("=== Done ===")
+    
+    print("\n" + "="*50)
+    print(f"Downloaded: {len(downloaded)} | Skipped: {len(skipped)} | Failed: {len(failed)}")
+    print("\nRECOMMENDED MINIMUM: Priority 1 datasets (CIC-IDS2017, CIC-IDS2018, CIC-TON-IoT, CIC-IoT-2023)")
+    print("BEST RESULTS: Priority 1 + Priority 2 datasets")
+    print("\nFor manual CTU-13: https://www.stratosphereips.org/datasets-ctu13")
+    print("="*50)
+
+def main():
+    """Run interactive or default download"""
+    import sys
+    
+    # Check for command line args
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--all":
+            download_priority_datasets(max_priority=3)
+        elif sys.argv[1] == "--essential":
+            download_priority_datasets(max_priority=1)
+        elif sys.argv[1] == "--recommended":
+            download_priority_datasets(max_priority=2)
+        else:
+            print("Usage: python dataset_manager.py [--essential|--recommended|--all]")
+            print("  --essential: Priority 1 datasets only (minimum for good results)")
+            print("  --recommended: Priority 1+2 datasets (best balance)")
+            print("  --all: All datasets including specialized ones")
+    else:
+        # Default: recommended priority level
+        download_priority_datasets(max_priority=2)
 
 if __name__ == "__main__":
     main()

@@ -35,16 +35,53 @@ The following table highlights why this project is a significant upgrade over th
     pip install -r requirements.txt
     ```
 
-2.  **Run the Dashboard**:
+2.  **Download Datasets** (for training):
+    ```bash
+    # Essential datasets (Priority 1 - minimum for good results)
+    python data_pipeline/dataset_manager.py --essential
+    
+    # Recommended datasets (Priority 1+2 - best balance, ~5-10GB)
+    python data_pipeline/dataset_manager.py --recommended
+    
+    # All datasets including specialized ones (Priority 1+2+3, ~20GB)
+    python data_pipeline/dataset_manager.py --all
+    ```
+
+3.  **Train Models** (if you have datasets):
+    ```bash
+    python models/train_local.py
+    ```
+
+4.  **Run the Dashboard**:
     ```bash
     streamlit run dashboard/app.py
     ```
 
-3.  **Usage**:
+5.  **Usage**:
     *   **Live Mode**: Monitors your active network interface.
     *   **File Mode**: Upload `sample_attack.pcap` or `traffic.csv` to analyze historical data.
 
-## 📂 Project Structure
+## � Recommended Datasets for Best Results
+
+| Priority | Dataset | Size | Description | Why Use It |
+|----------|---------|------|-------------|------------|
+| 1 (Essential) | CIC-IDS2017 | ~2GB | 14 attack types, normal traffic baseline | Classic benchmark, good for baseline |
+| 1 (Essential) | CSE-CIC-IDS2018 | ~10GB | 10-day realistic network traffic | Large scale, modern attacks |
+| 1 (Essential) | CIC-TON-IoT | ~3GB | IoT/IIoT attacks (9 categories) | Critical for IoT device security |
+| 1 (Essential) | CIC-IoT-2023 | ~5GB | 33 IoT devices, 100+ attack scenarios | Latest 2023 data, most comprehensive |
+| 2 (Important) | NSL-KDD | ~50MB | Improved KDD'99, balanced classes | Classic, good for validation |
+| 2 (Important) | CIC-DDoS2019 | ~5GB | Specialized DDoS attacks | For DDoS-focused detection |
+| 2 (Important) | UNSW-NB15 | ~2GB | 9 modern attack categories | Good mix of attacks |
+| 3 (Specialized) | CIC-Bell-DNS-2021 | ~1GB | DNS tunneling attacks | For DNS threat detection |
+| 3 (Specialized) | CIC-Darknet2020 | ~2GB | Tor, VPN, non-VPN traffic | For darknet analysis |
+
+**Training Improvements:**
+- **Dataset Merging**: Automatically merges multiple datasets with common features
+- **Stratified Sampling**: Preserves class distribution across train/test splits
+- **Hybrid Balancing**: Smart balancing of imbalanced classes (hybrid method)
+- **More Training Data**: Increased from 500k to 1M samples
+
+## �📂 Project Structure
 *   `dashboard/`: Contains the Streamlit web application.
 *   `realtime_detector/`: The core engine managing sniffing and model inference.
 *   `models/`: Trained Deep Learning models (CNN & Autoencoder) and Scalers.

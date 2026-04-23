@@ -9,3 +9,5 @@ plotly
 transformers
 torch
 openai
+imbalanced-learn
+scikit-learn

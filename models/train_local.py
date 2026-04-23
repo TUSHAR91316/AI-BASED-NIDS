@@ -1,7 +1,9 @@
 import os
 import sys
+import glob
 import numpy as np
 import pandas as pd
+from pathlib import Path
 import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
@@ -13,7 +15,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from data_pipeline.loader import DataLoader
 
 # Config
-DATASET_DIR = r"g:\Projects\AI-BASED-NIDS\dataset"
+DATASET_DIR = Path(r"g:\Projects\AI-BASED-NIDS\dataset")
 MODEL_DIR = r"g:\Projects\AI-BASED-NIDS\models"
 AUTOENCODER_DIR = os.path.join(MODEL_DIR, "autoencoder")
 
@@ -210,24 +212,184 @@ def build_deep_autoencoder(input_dim):
     autoencoder.compile(optimizer='adam', loss='mse')
     return autoencoder
 
+def load_and_merge_datasets(loader, max_samples_per_dataset=1000000):
+    """
+    Load and merge multiple datasets with intelligent sampling.
+    Uses stratified sampling to maintain class balance across datasets.
+    """
+    print("=== LOADING AND MERGING MULTIPLE DATASETS ===")
+    
+    # Load both CSV and Parquet files
+    df_list = []
+    
+    # Find all dataset files
+    dataset_files = []
+    for ext in ['*.parquet', '*.csv']:
+        dataset_files.extend(glob.glob(str(DATASET_DIR / "**" / ext), recursive=True))
+    
+    print(f"Found {len(dataset_files)} dataset files")
+    
+    for f in dataset_files:
+        print(f"\nProcessing: {f}")
+        try:
+            if f.endswith('.parquet'):
+                df = pd.read_parquet(f)
+            else:
+                df = pd.read_csv(f)
+            
+            initial_len = len(df)
+            
+            # Check for label column variations
+            label_col = None
+            for col in df.columns:
+                if col.lower() in ['label', 'labels', 'target', 'class', 'attack', 'category']:
+                    label_col = col
+                    break
+            
+            if label_col:
+                # Standardize label column name
+                df = df.rename(columns={label_col: 'Label'})
+                
+                # Show class distribution
+                label_counts = df['Label'].value_counts()
+                print(f"  Records: {initial_len}, Classes: {len(label_counts)}")
+                print(f"  Top classes: {dict(label_counts.head(3))}")
+                
+                # Smart sampling per dataset to balance memory usage
+                if len(df) > max_samples_per_dataset:
+                    # Stratified sampling to preserve class distribution
+                    try:
+                        from sklearn.model_selection import StratifiedShuffleSplit
+                        sss = StratifiedShuffleSplit(n_splits=1, train_size=max_samples_per_dataset, random_state=42)
+                        for _, sample_idx in sss.split(df, df['Label']):
+                            df = df.iloc[sample_idx]
+                    except:
+                        # Fallback to random sampling if stratified fails
+                        df = df.sample(max_samples_per_dataset, random_state=42)
+                    print(f"  Sampled to: {len(df)} records")
+            else:
+                print(f"  Warning: No label column found, skipping")
+                continue
+            
+            df_list.append(df)
+            
+        except Exception as e:
+            print(f"  Error loading {f}: {e}")
+    
+    if not df_list:
+        print("Error: No valid datasets found!")
+        return pd.DataFrame()
+    
+    # Merge all datasets
+    print(f"\n=== MERGING {len(df_list)} DATASETS ===")
+    
+    # Find common columns across all datasets
+    common_cols = set(df_list[0].columns)
+    for df in df_list[1:]:
+        common_cols &= set(df.columns)
+    
+    print(f"Common columns: {len(common_cols)}")
+    
+    # Select only common columns and merge
+    merged_df = pd.concat([df[list(common_cols)] for df in df_list], ignore_index=True)
+    
+    print(f"\nTotal records: {len(merged_df)}")
+    print(f"Class distribution:")
+    print(merged_df['Label'].value_counts())
+    
+    return merged_df
+
+def balance_dataset(df, method='hybrid'):
+    """
+    Balance dataset using multiple strategies.
+    method: 'undersample', 'oversample', or 'hybrid' (default)
+    """
+    from sklearn.utils import resample
+    
+    label_counts = df['Label'].value_counts()
+    max_count = label_counts.max()
+    min_count = label_counts.min()
+    
+    print(f"\n=== BALANCING DATASET (method={method}) ===")
+    print(f"Before: {dict(label_counts)}")
+    
+    if method == 'undersample':
+        # Downsample majority classes
+        target_size = min_count * 2  # Keep at least 2x minority class
+        balanced_dfs = []
+        for label in label_counts.index:
+            df_class = df[df['Label'] == label]
+            if len(df_class) > target_size:
+                df_class = resample(df_class, replace=False, n_samples=target_size, random_state=42)
+            balanced_dfs.append(df_class)
+        df = pd.concat(balanced_dfs)
+        
+    elif method == 'oversample':
+        # Upsample minority classes using SMOTE-like approach
+        try:
+            from imblearn.over_sampling import SMOTE
+            # This requires numeric features only
+            X = df.drop('Label', axis=1).select_dtypes(include=[np.number])
+            y = df['Label']
+            smote = SMOTE(random_state=42, sampling_strategy='auto')
+            X_resampled, y_resampled = smote.fit_resample(X, y)
+            df = pd.concat([pd.DataFrame(X_resampled), pd.Series(y_resampled, name='Label')], axis=1)
+        except Exception as e:
+            print(f"SMOTE failed ({e}), using random oversampling")
+            target_size = max_count // 2
+            balanced_dfs = []
+            for label in label_counts.index:
+                df_class = df[df['Label'] == label]
+                if len(df_class) < target_size:
+                    df_class = resample(df_class, replace=True, n_samples=target_size, random_state=42)
+                balanced_dfs.append(df_class)
+            df = pd.concat(balanced_dfs)
+            
+    else:  # hybrid
+        # Smart balancing: neither fully undersample nor fully oversample
+        target_size = int(np.median(label_counts))
+        balanced_dfs = []
+        for label in label_counts.index:
+            df_class = df[df['Label'] == label]
+            if len(df_class) > target_size * 2:
+                # Undersample very large classes
+                df_class = resample(df_class, replace=False, n_samples=target_size * 2, random_state=42)
+            elif len(df_class) < target_size // 2:
+                # Oversample very small classes
+                df_class = resample(df_class, replace=True, n_samples=target_size // 2, random_state=42)
+            balanced_dfs.append(df_class)
+        df = pd.concat(balanced_dfs)
+    
+    print(f"After: {dict(df['Label'].value_counts())}")
+    return df
+
 def train_local():
-    print("=== STARTING ADVANCED GPU TRAINING ===")
+    print("=== STARTING ADVANCED GPU TRAINING WITH ENHANCED DATASETS ===")
     
-    # 1. Load Data
+    # 1. Load and Merge Multiple Datasets
     loader = DataLoader(DATASET_DIR)
-    print("Loading Dataset (Limit to 500k samples for better training)...")
-    
-    # Load 2017 data (Parquet)
-    df = loader.load_files(pattern="*.parquet") 
+    df = load_and_merge_datasets(loader, max_samples_per_dataset=800000)
     
     if df.empty:
         print("Error: No data found in dataset directory.")
+        print("Run: python data_pipeline/dataset_manager.py --recommended")
         return
-
-    # Sampling for speed/memory balance on local machine
-    if len(df) > 500000:
-        print(f"Sampling 500k from {len(df)} records...")
-        df = df.sample(500000)
+    
+    # 2. Balance the dataset for better training
+    df = balance_dataset(df, method='hybrid')
+    
+    # 3. Final sampling for memory management (but keep more data)
+    MAX_TRAINING_SAMPLES = 1000000  # Increased from 500k
+    if len(df) > MAX_TRAINING_SAMPLES:
+        print(f"\nStratified sampling to {MAX_TRAINING_SAMPLES} for training...")
+        # Use stratified sampling to preserve class distribution
+        try:
+            from sklearn.model_selection import StratifiedShuffleSplit
+            sss = StratifiedShuffleSplit(n_splits=1, train_size=MAX_TRAINING_SAMPLES, random_state=42)
+            for _, sample_idx in sss.split(df, df['Label']):
+                df = df.iloc[sample_idx]
+        except:
+            df = df.sample(MAX_TRAINING_SAMPLES, random_state=42)
     
     print(f"Preprocessing {len(df)} samples...")
     # Preprocess (Scale + Align)
