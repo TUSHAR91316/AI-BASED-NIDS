@@ -4,6 +4,8 @@ import glob
 import os
 from pathlib import Path
 from sklearn.preprocessing import MinMaxScaler, LabelEncoder
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import gc
 
 class FeatureAligner:
     """
@@ -62,60 +64,108 @@ class DataLoader:
         ]
         self.aligner = FeatureAligner(self.required_features)
 
-    def load_files(self, pattern="*"):
-        """Loads and merges all CSVs/Parquets matching the pattern."""
+    def load_files_optimized(self, pattern="*", max_workers=4, chunk_size=100000):
+        """Loads and merges all CSVs/Parquets with parallel processing and chunking."""
         # Check both csv and parquet
         files = glob.glob(str(self.dataset_path / "**" / "*.csv"), recursive=True)
         files += glob.glob(str(self.dataset_path / "**" / "*.parquet"), recursive=True)
-        
-        df_list = []
-        for f in files:
-            print(f"Loading {f}...")
-            try:
-                if f.endswith('.parquet'):
-                    df = pd.read_parquet(f)
-                else:
-                    df = pd.read_csv(f)
-                
-                # Align columns immediately to save memory if possible, or just append
-                # For now append raw, align later
-                df_list.append(df)
-            except Exception as e:
-                print(f"Error loading {f}: {e}")
-        
-        if not df_list:
+
+        if not files:
             print("No files found.")
             return pd.DataFrame()
 
-        full_df = pd.concat(df_list, ignore_index=True)
+        print(f"Loading {len(files)} files with {max_workers} workers...")
+
+        # Parallel file loading
+        df_chunks = []
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_file = {executor.submit(self._load_single_file_chunked, f, chunk_size): f for f in files}
+
+            for future in as_completed(future_to_file):
+                file_path = future_to_file[future]
+                try:
+                    chunks = future.result()
+                    df_chunks.extend(chunks)
+                    print(f"✅ Loaded {file_path}")
+                except Exception as e:
+                    print(f"❌ Error loading {file_path}: {e}")
+
+        if not df_chunks:
+            return pd.DataFrame()
+
+        # Concatenate all chunks
+        print("Concatenating chunks...")
+        full_df = pd.concat(df_chunks, ignore_index=True)
+
+        # Force garbage collection
+        del df_chunks
+        gc.collect()
+
         return full_df
 
-    def preprocess(self, df, label_col='Label'):
+    def _load_single_file_chunked(self, file_path, chunk_size):
+        """Load a single file in chunks to manage memory."""
+        chunks = []
+        try:
+            if file_path.endswith('.parquet'):
+                # Parquet files can be loaded directly (usually compressed)
+                df = pd.read_parquet(file_path)
+                chunks.append(df)
+            else:
+                # CSV files - load in chunks
+                for chunk in pd.read_csv(file_path, chunksize=chunk_size):
+                    chunks.append(chunk)
+        except Exception as e:
+            print(f"Error loading {file_path}: {e}")
+            return []
+
+        return chunks
+
+def preprocess_optimized(self, df, label_col='Label', batch_size=50000):
         """
-        Cleans and aligns the data.
+        Cleans and aligns the data with memory optimization.
         """
+        print(f"Preprocessing {len(df)} rows...")
+
         # Handle Labels (Encode Benign=0, Attack=1 for Supervised)
         if label_col in df.columns:
             # Standardize label names (CIC datasets use 'BENIGN')
             df['target'] = df[label_col].apply(lambda x: 0 if str(x).upper() == 'BENIGN' else 1)
-        
-        # Clean infinite/NaN values
-        df.replace([np.inf, -np.inf], np.nan, inplace=True)
-        df.dropna(inplace=True)
-        
+
+        # Clean infinite/NaN values in batches
+        print("Cleaning data...")
+        for i in range(0, len(df), batch_size):
+            end_idx = min(i + batch_size, len(df))
+            batch = df.iloc[i:end_idx]
+            batch.replace([np.inf, -np.inf], np.nan, inplace=True)
+            # Fill NaN with 0 for numerical columns
+            numeric_cols = batch.select_dtypes(include=[np.number]).columns
+            batch[numeric_cols] = batch[numeric_cols].fillna(0)
+            df.iloc[i:end_idx] = batch
+
         # Align features
+        print("Aligning features...")
         X = self.aligner.align(df)
-        
-        # Normalize
+
+        # Normalize in batches to save memory
+        print("Normalizing data...")
         scaler = MinMaxScaler()
-        X_scaled = scaler.fit_transform(X)
-        
+        X_scaled = np.zeros_like(X, dtype=np.float32)
+
+        for i in range(0, len(X), batch_size):
+            end_idx = min(i + batch_size, len(X))
+            X_scaled[i:end_idx] = scaler.fit_transform(X.iloc[i:end_idx])
+
         # Save Scaler for Real-Time use
         import joblib
-        scaler_path = self.dataset_path / "scaler.save"
+        scaler_path = self.dataset_path / "scaler.joblib"
         joblib.dump(scaler, scaler_path)
         print(f"Scaler saved to {scaler_path}")
-        
+
+        # Clean up memory
+        del X
+        gc.collect()
+
         return X_scaled, df['target'] if 'target' in df.columns else None
 
     def load_scaler(self):

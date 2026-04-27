@@ -9,9 +9,15 @@ from tensorflow import keras
 from tensorflow.keras import layers
 from sklearn.model_selection import train_test_split
 import joblib
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+# Enable mixed precision for faster training
+tf.keras.mixed_precision.set_global_policy('mixed_float16')
+
 from data_pipeline.loader import DataLoader
 
 # Config
@@ -22,13 +28,18 @@ AUTOENCODER_DIR = os.path.join(MODEL_DIR, "autoencoder")
 os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(AUTOENCODER_DIR, exist_ok=True)
 
-# GPU Header
+# GPU Header with memory optimization
 gpus = tf.config.experimental.list_physical_devices('GPU')
 if gpus:
     try:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
+            # Limit GPU memory usage to 80%
+            tf.config.experimental.set_virtual_device_configuration(
+                gpu, [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=8000)]
+            )
         print(f"✅ GPU Detected & Configured: {gpus}")
+        print("✅ Mixed Precision Enabled")
     except RuntimeError as e:
         print(e)
 else:

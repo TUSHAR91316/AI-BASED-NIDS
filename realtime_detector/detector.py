@@ -8,6 +8,12 @@ from scapy.all import sniff, IP, TCP, UDP, conf
 from collections import deque
 import json
 from datetime import datetime
+import asyncio
+import aiofiles
+import threading
+from concurrent.futures import ThreadPoolExecutor
+import functools
+from cachetools import LRUCache
 
 # Import Project Modules
 import sys
@@ -22,7 +28,7 @@ from fusion_engine.fusion import FusionEngine
 from fusion_engine.rule_engine import RuleEngine
 
 class RealTimeDetector:
-    def __init__(self, interface=None):
+    def __init__(self, interface=None, max_active_flows=10000, batch_size=32):
         # Auto-detect interface if not provided
         if interface is None:
             self.interface = conf.iface
@@ -33,6 +39,27 @@ class RealTimeDetector:
         self.flow_extractor = FlowFeatureExtractor()
         self.fusion_engine = FusionEngine()
         self.rule_engine = RuleEngine()
+        
+        # Optimized parameters
+        self.max_active_flows = max_active_flows
+        self.batch_size = batch_size
+        self.inference_queue = deque(maxlen=1000)  # Queue for batch inference
+        self.alert_buffer = deque(maxlen=5000)     # Buffer for async logging
+
+        # LRU Cache for active flows (memory efficient)
+        self.active_flows = LRUCache(maxsize=max_active_flows)
+
+        # Thread pool for parallel operations
+        self.executor = ThreadPoolExecutor(max_workers=4)
+        self.loop = asyncio.new_event_loop()
+
+        # Async logging thread
+        self.logging_thread = threading.Thread(target=self._async_logging_worker, daemon=True)
+        self.logging_thread.start()
+
+        # Batch inference thread
+        self.inference_thread = threading.Thread(target=self._batch_inference_worker, daemon=True)
+        self.inference_thread.start()
         
         # Paths
         self.model_path = os.path.join(PROJECT_ROOT, "models", "cnn_model.h5")
@@ -47,8 +74,6 @@ class RealTimeDetector:
         self.log_path = os.path.join(PROJECT_ROOT, "dashboard", "alerts.json")
 
         # Initialize Models to None
-
-        # Initialize Models to None
         self.cnn_model = None
         self.autoencoder = None
         self.lstm_model = None
@@ -57,69 +82,150 @@ class RealTimeDetector:
         self.scaler = None
         self.anomaly_threshold = 0.05
         
-        self.active_flows = {}
-
-        # Load Models & Scaler
+        # Load Models & Scaler (Parallel loading)
         print("Loading Models...")
-        
-        # Load Scaler
-        if os.path.exists(self.scaler_path):
-            try:
-                self.scaler = joblib.load(self.scaler_path)
-                print("✅ Loaded Scaler")
-            except Exception as e:
-                print(f"❌ Error loading Scaler: {e}")
-        
-        # Load CNN
-        if os.path.exists(self.model_path):
-            try:
-                self.cnn_model = keras.models.load_model(self.model_path, compile=False)
-                print(f"✅ Loaded CNN Model from {self.model_path}")
-            except Exception as e:
-                print(f"❌ Error loading CNN: {e}")
-        
-        # Load Autoencoder
-        if os.path.exists(self.ae_path):
-            try:
-                self.autoencoder = keras.models.load_model(self.ae_path, compile=False)
-                print(f"✅ Loaded Autoencoder from {self.ae_path}")
-            except Exception as e:
-                print(f"❌ Error loading Autoencoder: {e}")
-                
-        # Load Threshold
-        if os.path.exists(self.ae_threshold_path):
-            try:
-                with open(self.ae_threshold_path, "r") as f:
-                    self.anomaly_threshold = float(f.read().strip())
-                print(f"✅ Loaded Anomaly Threshold: {self.anomaly_threshold}")
-            except Exception as e:
-                print(f"⚠️ Error loading Anomaly Threshold: {e}")
-                
-        # Load LSTM
-        if os.path.exists(self.lstm_path):
-            try:
-                self.lstm_model = keras.models.load_model(self.lstm_path, compile=False)
-                print(f"✅ Loaded LSTM Model from {self.lstm_path}")
-            except Exception as e:
-                print(f"❌ Error loading LSTM: {e}")
-                
-        # Load Transformer
-        if os.path.exists(self.trans_path):
-            try:
-                self.transformer_model = keras.models.load_model(self.trans_path, compile=False)
-                print(f"✅ Loaded Transformer Model from {self.trans_path}")
-            except Exception as e:
-                print(f"⚠️ Could not load Transformer (Custom Layer issue?): {e}")
+        self._load_models_parallel()
 
-        # Load Isolation Forest
-        if os.path.exists(self.iso_path):
-            try:
-                self.iso_forest = joblib.load(self.iso_path)
-                print(f"✅ Loaded Isolation Forest from {self.iso_path}")
-            except Exception as e:
-                print(f"❌ Error loading Isolation Forest: {e}")
+    def _load_models_parallel(self):
+        """Load all models in parallel for faster startup."""
+        def load_scaler():
+            if os.path.exists(self.scaler_path):
+                try:
+                    self.scaler = joblib.load(self.scaler_path)
+                    print("✅ Loaded Scaler")
+                except Exception as e:
+                    print(f"❌ Error loading Scaler: {e}")
+
+        def load_threshold():
+            if os.path.exists(self.ae_threshold_path):
+                try:
+                    with open(self.ae_threshold_path, "r") as f:
+                        self.anomaly_threshold = float(f.read().strip())
+                    print(f"✅ Loaded Anomaly Threshold: {self.anomaly_threshold}")
+                except Exception as e:
+                    print(f"⚠️ Error loading Anomaly Threshold: {e}")
+
+        def load_cnn():
+            if os.path.exists(self.model_path):
+                try:
+                    self.cnn_model = keras.models.load_model(self.model_path, compile=False)
+                    print(f"✅ Loaded CNN Model from {self.model_path}")
+                except Exception as e:
+                    print(f"❌ Error loading CNN: {e}")
+
+        def load_autoencoder():
+            if os.path.exists(self.ae_path):
+                try:
+                    self.autoencoder = keras.models.load_model(self.ae_path, compile=False)
+                    print(f"✅ Loaded Autoencoder from {self.ae_path}")
+                except Exception as e:
+                    print(f"❌ Error loading Autoencoder: {e}")
+
+        def load_lstm():
+            if os.path.exists(self.lstm_path):
+                try:
+                    self.lstm_model = keras.models.load_model(self.lstm_path, compile=False)
+                    print(f"✅ Loaded LSTM Model from {self.lstm_path}")
+                except Exception as e:
+                    print(f"❌ Error loading LSTM: {e}")
+
+        def load_transformer():
+            if os.path.exists(self.trans_path):
+                try:
+                    self.transformer_model = keras.models.load_model(self.trans_path, compile=False)
+                    print(f"✅ Loaded Transformer Model from {self.trans_path}")
+                except Exception as e:
+                    print(f"⚠️ Could not load Transformer (Custom Layer issue?): {e}")
+
+        def load_isolation_forest():
+            if os.path.exists(self.iso_path):
+                try:
+                    self.iso_forest = joblib.load(self.iso_path)
+                    print(f"✅ Loaded Isolation Forest from {self.iso_path}")
+                except Exception as e:
+                    print(f"❌ Error loading Isolation Forest: {e}")
+
+        # Load all models in parallel
+        futures = [
+            self.executor.submit(load_scaler),
+            self.executor.submit(load_threshold),
+            self.executor.submit(load_cnn),
+            self.executor.submit(load_autoencoder),
+            self.executor.submit(load_lstm),
+            self.executor.submit(load_transformer),
+            self.executor.submit(load_isolation_forest)
+        ]
+
+        # Wait for all to complete
+        for future in futures:
+            future.result()
 
         print("✅ Finished model loading phase.")
+
+    def _async_logging_worker(self):
+        """Async worker for logging alerts to disk."""
+        asyncio.set_event_loop(self.loop)
+        while True:
+            try:
+                if self.alert_buffer:
+                    alerts_to_log = list(self.alert_buffer)
+                    self.alert_buffer.clear()
+                    asyncio.run(self._write_alerts_async(alerts_to_log))
+                time.sleep(0.1)  # Small delay to prevent busy waiting
+            except Exception as e:
+                print(f"Async logging error: {e}")
+
+    async def _write_alerts_async(self, alerts):
+        """Asynchronously write alerts to disk."""
+        try:
+            # Read existing alerts
+            if os.path.exists(self.log_path):
+                async with aiofiles.open(self.log_path, 'r') as f:
+                    content = await f.read()
+                    if content.strip():
+                        existing_alerts = json.loads(content)
+                    else:
+                        existing_alerts = []
+            else:
+                existing_alerts = []
+
+            # Append new alerts
+            existing_alerts.extend(alerts)
+
+            # Keep last 1000 alerts
+            if len(existing_alerts) > 1000:
+                existing_alerts = existing_alerts[-1000:]
+
+            # Write back
+            async with aiofiles.open(self.log_path, 'w') as f:
+                await f.write(json.dumps(existing_alerts, indent=4))
+
+        except Exception as e:
+            print(f"Error writing alerts: {e}")
+
+    def _batch_inference_worker(self):
+        """Worker for batch inference processing."""
+        while True:
+            try:
+                if len(self.inference_queue) >= self.batch_size:
+                    # Process batch
+                    batch_data = []
+                    for _ in range(min(self.batch_size, len(self.inference_queue))):
+                        batch_data.append(self.inference_queue.popleft())
+
+                    self._process_batch(batch_data)
+                time.sleep(0.01)  # Small delay
+            except Exception as e:
+                print(f"Batch inference error: {e}")
+
+    def _process_batch(self, batch_data):
+        """Process a batch of flows for inference."""
+        for flow_key, packets in batch_data:
+            try:
+                self.analyze_flow(flow_key)
+                self.active_flows[flow_key] = []  # Reset after analysis
+            except Exception as e:
+                print(f"Error processing batch flow {flow_key}: {e}")
 
     def get_model_status(self):
         return {
@@ -195,10 +301,11 @@ class RealTimeDetector:
             # print(f"DEBUG: Dropping malformed packet: {e}")
             return
         
-        # Trigger Detection if Flow grows (e.g., > 10 packets)
+        # Trigger Detection if Flow grows (e.g., > 10 packets) or queue batch size reached
         if len(self.active_flows[flow_key]) >= 10:
-            self.analyze_flow(flow_key)
-            self.active_flows[flow_key] = [] # Reset
+            # Add to inference queue instead of immediate processing
+            self.inference_queue.append((flow_key, self.active_flows[flow_key].copy()))
+            # Don't reset here - let batch worker handle it
 
     def analyze_flow(self, flow_key):
         packets = self.active_flows.get(flow_key, [])
@@ -346,27 +453,8 @@ class RealTimeDetector:
         # Print to Console
         print(f"🚨 ALERT: {alert['alert_level']} Risk ({alert['risk_score']}) from {alert['src_ip']}")
         
-        if not os.path.exists(os.path.dirname(self.log_path)):
-             os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
-        
-        # Read existing
-        try:
-            with open(self.log_path, 'r') as f:
-                data = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            data = []
-        
-        data.append(alert)
-        # Keep last 1000 alerts (increased from 100 for better history)
-        if len(data) > 1000:
-            data = data[-1000:]
-            
-        with open(self.log_path, 'w') as f:
-            json.dump(data, f, indent=4)
-
-    def start(self):
-        print("Realtime Detection is currently DISABLED per user request.")
-        # print(f"Starting NIDS on {self.interface}...")
+        # Add to async buffer instead of immediate write
+        self.alert_buffer.append(alert)
         # sniff(iface=self.interface, prn=self.process_packet, store=0)
 
 if __name__ == "__main__":

@@ -3,13 +3,17 @@ import pandas as pd
 import json
 import time
 import os
+import asyncio
+import aiofiles
 import plotly.express as px
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from scapy.all import rdpcap, IP, TCP, UDP
 from datetime import datetime
 import socket
 import struct
+from functools import lru_cache
 
 def int_to_ip(addr):
     try:
@@ -92,9 +96,25 @@ def load_alerts():
     except:
         return []
 
-# --- Analysis Functions ---
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def load_alerts_cached():
+    """Cached version of alert loading for better performance."""
+    if not os.path.exists(ALERT_LOG):
+        return []
+    try:
+        with open(ALERT_LOG, 'r') as f:
+            alerts = json.load(f)
+            # Apply integer to IP conversion safely
+            for a in alerts:
+                if 'src_ip' in a: a['src_ip'] = int_to_ip(a['src_ip'])
+                if 'dst_ip' in a: a['dst_ip'] = int_to_ip(a['dst_ip'])
+            return alerts
+    except:
+        return []
 
-def plot_source_ip_distribution(alerts):
+# Keep the original function for backward compatibility
+def load_alerts():
+    return load_alerts_cached()
     if not alerts:
         return
     
@@ -128,6 +148,7 @@ def plot_severity_distribution(alerts):
     st.plotly_chart(fig, use_container_width=True)
 
 def process_pcap_file(uploaded_file, detector):
+    """Optimized PCAP processing with batch processing."""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pcap") as tmp:
         try:
             tmp.write(uploaded_file.getvalue())
@@ -135,41 +156,52 @@ def process_pcap_file(uploaded_file, detector):
         except Exception as e:
             st.error(f"Error saving temp file: {e}")
             return
-    
+
     st.info(f"Processing {uploaded_file.name}...")
     bar = st.progress(0)
     status_text = st.empty()
-    
+
     # Clear existing alerts for fresh analysis
     detector.clear_alerts()
     st.session_state['refresh'] = True
-    
+
     start_time = str(datetime.now())
-    
+
     try:
         packets = rdpcap(tmp_path)
         total_pkts = len(packets)
-        
-        for i, pkt in enumerate(packets):
-            detector.process_packet(pkt)
-            if i % 100 == 0:
-                bar.progress(min(1.0, i / total_pkts))
-                status_text.text(f"Analyzed {i}/{total_pkts} packets...")
-        
+
+        # Process packets in batches for better performance
+        batch_size = 500  # Increased batch size for better throughput
+
+        for i in range(0, total_pkts, batch_size):
+            batch_end = min(i + batch_size, total_pkts)
+            batch_packets = packets[i:batch_end]
+
+            # Process batch
+            for pkt in batch_packets:
+                detector.process_packet(pkt)
+
+            # Update progress less frequently for better performance
+            if i % (batch_size * 2) == 0 or batch_end == total_pkts:
+                progress = batch_end / total_pkts
+                bar.progress(min(1.0, progress))
+                status_text.text(f"Analyzed {batch_end}/{total_pkts} packets...")
+
         # Flush remaining flows
         status_text.text("Flushing active flows...")
         for key in list(detector.active_flows.keys()):
-            if detector.active_flows[key]: 
+            if detector.active_flows[key]:
                 detector.analyze_flow(key)
-                detector.active_flows[key] = [] 
-                
+                detector.active_flows[key] = []
+
         bar.progress(1.0)
         status_text.text("Analysis Complete!")
         st.success("✅ Analysis Finished.")
-        
+
         # Force UI refresh to display active results
         st.rerun()
-        
+
     except Exception as e:
         st.error(f"Error processing PCAP: {e}")
     finally:

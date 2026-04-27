@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.stats import entropy
 from collections import Counter
+import numba as nb
 
 class FlowFeatureExtractor:
     """
@@ -10,6 +11,29 @@ class FlowFeatureExtractor:
     def __init__(self):
         pass
 
+    @staticmethod
+    @nb.jit(nopython=True)
+    def calculate_entropy_optimized(payload_bytes):
+        """
+        Optimized entropy calculation using Numba.
+        """
+        if len(payload_bytes) == 0:
+            return 0.0
+
+        # Use numpy histogram for faster counting
+        hist, _ = np.histogram(payload_bytes, bins=256, range=(0, 255))
+        hist = hist[hist > 0]  # Remove zeros
+        hist = hist.astype(np.float64)
+        hist /= hist.sum()
+
+        # Calculate entropy
+        entropy_val = 0.0
+        for p in hist:
+            if p > 0:
+                entropy_val -= p * np.log2(p)
+
+        return entropy_val
+
     def calculate_entropy(self, payload_bytes):
         """
         Calculates Shannon Entropy of packet payload.
@@ -17,12 +41,24 @@ class FlowFeatureExtractor:
         """
         if not payload_bytes:
             return 0.0
-        
-        # Convert bytes to counts [0-255]
-        counts = Counter(payload_bytes)
-        frequencies = [c / len(payload_bytes) for c in counts.values()]
-        
-        return entropy(frequencies, base=2)
+
+        # Use optimized version for better performance
+        return self.calculate_entropy_optimized(np.frombuffer(payload_bytes, dtype=np.uint8))
+
+    @staticmethod
+    @nb.jit(nopython=True)
+    def calculate_iat_stats_optimized(timestamps):
+        """
+        Optimized IAT calculation using Numba.
+        """
+        if len(timestamps) < 2:
+            return 0.0, 0.0, 0.0, 0.0
+
+        # Sort timestamps
+        sorted_times = np.sort(timestamps)
+        iats = np.diff(sorted_times)
+
+        return float(np.mean(iats)), float(np.std(iats)), float(np.max(iats)), float(np.min(iats))
 
     def calculate_iat(self, timestamps):
         """
@@ -36,15 +72,15 @@ class FlowFeatureExtractor:
                 'iat_max': 0.0,
                 'iat_min': 0.0
             }
-        
-        # Calculate differences
-        user_iats = np.diff(sorted(timestamps))
-        
+
+        # Use optimized version
+        mean_iat, std_iat, max_iat, min_iat = self.calculate_iat_stats_optimized(np.array(timestamps))
+
         return {
-            'iat_mean': float(np.mean(user_iats)),
-            'iat_std': float(np.std(user_iats)),
-            'iat_max': float(np.max(user_iats)),
-            'iat_min': float(np.min(user_iats))
+            'iat_mean': mean_iat,
+            'iat_std': std_iat,
+            'iat_max': max_iat,
+            'iat_min': min_iat
         }
 
     def extract_features(self, packets):
