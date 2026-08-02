@@ -24,10 +24,9 @@ class FusionEngine:
         self.decision_times = []
         self.total_decisions = 0
 
-    @lru_cache(maxsize=5000)
     def _cached_risk_computation(self, supervised_score, anomaly_score, rule_score):
         """
-        Cached version of risk score computation for repeated similar inputs.
+        Core risk score computation. Results are cached via self.decision_cache above.
         """
         risk_score = (
             (self.w_supervised * supervised_score) +

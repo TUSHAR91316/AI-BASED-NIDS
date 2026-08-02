@@ -17,3 +17,6 @@ __pycache__/
 
 # Logs
 dashboard/alerts.json
+.vscode/settings.json
+AGENTS.md
+AI.md

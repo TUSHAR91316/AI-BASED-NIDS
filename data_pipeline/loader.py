@@ -121,7 +121,7 @@ class DataLoader:
 
         return chunks
 
-def preprocess_optimized(self, df, label_col='Label', batch_size=50000):
+    def preprocess_optimized(self, df, label_col='Label', batch_size=50000):
         """
         Cleans and aligns the data with memory optimization.
         """
@@ -170,7 +170,7 @@ def preprocess_optimized(self, df, label_col='Label', batch_size=50000):
 
     def load_scaler(self):
         import joblib
-        scaler_path = self.dataset_path / "scaler.save"
+        scaler_path = self.dataset_path / "scaler.joblib"
         if scaler_path.exists():
             return joblib.load(scaler_path)
         return None

@@ -10,8 +10,9 @@ import os
 import shutil
 
 # Paths
-DATASET_DIR = r"g:\Projects\AI-BASED-NIDS\dataset"
-MODEL_DIR = r"g:\Projects\AI-BASED-NIDS\models"
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+DATASET_DIR = os.path.join(PROJECT_ROOT, "dataset")
+MODEL_DIR = os.path.join(PROJECT_ROOT, "models")
 
 def retrain_model():
     print("=== STARTING RETRAINING PIPELINE ===")
@@ -29,12 +30,11 @@ def retrain_model():
         print("Not enough samples to retrain. Waiting for more data.")
         return
 
-    # 2. Preprocess (Reuse Loader Logic conceptually)
-    # Ideally, we import loader here. For now, assuming data is already roughly aligned or we align it
+    # Preprocess (Reuse Loader Logic conceptually)
     try:
-        scaler = joblib.load(os.path.join(DATASET_DIR, "scaler.save"))
-    except:
-        print("Scaler not found. Cannot normalize.")
+        scaler = joblib.load(os.path.join(MODEL_DIR, "scaler.joblib"))
+    except Exception:
+        print("Scaler not found at models/scaler.joblib. Cannot normalize.")
         return
 
     # Separate X, y

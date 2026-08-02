@@ -1,13 +1,41 @@
-streamlit
-pandas
-numpy
-scipy
-scapy
-tensorflow
-joblib
-plotly
-transformers
-torch
-openai
-imbalanced-learn
-scikit-learn
+# ============================================================
+# AI-BASED NIDS — Python Dependencies
+# Install with: pip install -r requirements.txt
+# ============================================================
+
+# ── Core ML / DL ───────────────────────────────────────────
+tensorflow>=2.12.0
+torch>=2.0.0
+scikit-learn>=1.2.0
+imbalanced-learn>=0.10.0
+
+# ── Data Processing ─────────────────────────────────────────
+pandas>=1.5.0
+numpy>=1.23.0
+scipy>=1.10.0
+
+# ── Performance Acceleration ────────────────────────────────
+numba>=0.57.0              # JIT-compiled entropy/IAT calculations
+joblib>=1.2.0              # Model serialization (scalers, IF)
+
+# ── Network Packet Capture ──────────────────────────────────
+scapy>=2.5.0               # Packet sniffing (requires Npcap on Windows)
+
+# ── SOC Dashboard ───────────────────────────────────────────
+streamlit>=1.25.0
+plotly>=5.14.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# ── LLM / NLP (Optional — Threat Summarizer) ────────────────
+transformers>=4.30.0
+openai>=1.0.0              # Optional: GPT-4 summarization
+
+# ── Async & Caching ─────────────────────────────────────────
+aiofiles>=23.0.0           # Async alert file logging
+cachetools>=5.3.0          # LRU cache for active flows
+
+# ── Dataset Download ─────────────────────────────────────────
+kaggle>=1.5.16             # Kaggle API for dataset downloads
+tqdm>=4.65.0               # Download progress bars
+requests>=2.28.0           # HTTP dataset access

@@ -4,7 +4,10 @@ import json
 import time
 import os
 import asyncio
-import aiofiles
+try:
+    import aiofiles
+except ImportError:
+    aiofiles = None
 import plotly.express as px
 import sys
 import tempfile
@@ -33,8 +36,8 @@ try:
 except ImportError as e:
     st.error(f"Failed to import Detection Engine. Make sure you are running from the Project Root. Error: {e}")
 
-# Configuration
-ALERT_LOG = r"g:\Projects\AI-BASED-NIDS\dashboard\alerts.json"
+# Derive alert log path from this file's location so it works on any machine
+ALERT_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "alerts.json")
 
 st.set_page_config(
     page_title="AI-NIDS Dashboard",
@@ -82,23 +85,9 @@ def get_detector_v2():
         st.error(f"Failed to initialize detector: {e}")
         return None
 
-def load_alerts():
-    if not os.path.exists(ALERT_LOG):
-        return []
-    try:
-        with open(ALERT_LOG, 'r') as f:
-            alerts = json.load(f)
-            # Apply integer to IP conversion safely
-            for a in alerts:
-                if 'src_ip' in a: a['src_ip'] = int_to_ip(a['src_ip'])
-                if 'dst_ip' in a: a['dst_ip'] = int_to_ip(a['dst_ip'])
-            return alerts
-    except:
-        return []
-
 @st.cache_data(ttl=300)  # Cache for 5 minutes
-def load_alerts_cached():
-    """Cached version of alert loading for better performance."""
+def load_alerts():
+    """Load and cache alerts from disk."""
     if not os.path.exists(ALERT_LOG):
         return []
     try:
@@ -112,9 +101,7 @@ def load_alerts_cached():
     except:
         return []
 
-# Keep the original function for backward compatibility
-def load_alerts():
-    return load_alerts_cached()
+def plot_source_ip_distribution(alerts):
     if not alerts:
         return
     
@@ -301,7 +288,9 @@ with st.sidebar:
 
 # Main Dashboard View
 
-if app_mode == "Live Monitor":
+# The sidebar radio only exposes "File Analysis" and "History" modes.
+# Live Monitor is reserved for future implementation.
+if app_mode not in ["File Analysis", "History"]:
     st.warning("Live Monitor is currently disabled.")
 
 else:
@@ -418,7 +407,7 @@ else:
         if st.button("Generate Intelligence Report 🧠"):
             with st.spinner("Analyzing threat patterns and generating report (this may take a minute on first run)..."):
                 try:
-                    from llm_summarizer import ThreatSummarizer
+                    from dashboard.llm_summarizer import ThreatSummarizer
                     summarizer_instance = ThreatSummarizer()
                     report = summarizer_instance.generate_summary(alerts)
                     st.session_state['genai_report'] = report

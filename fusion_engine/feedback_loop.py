@@ -3,6 +3,8 @@ import os
 import time
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 class FeedbackLoop:
     """
     Manages the 'Active Learning' cycle.
@@ -10,8 +12,11 @@ class FeedbackLoop:
     2. Logs the flow data + Correct Label to 'verified_new.csv'.
     3. Triggers Retraining if enough new samples are collected.
     """
-    def __init__(self, dataset_dir=r"g:\Projects\AI-BASED-NIDS\dataset"):
-        self.dataset_dir = Path(dataset_dir)
+    def __init__(self, dataset_dir=None):
+        if dataset_dir is None:
+            self.dataset_dir = PROJECT_ROOT / "dataset"
+        else:
+            self.dataset_dir = Path(dataset_dir)
         self.feedback_file = self.dataset_dir / "verified_new.csv"
         self.retrain_threshold = 100 # Retrain after 100 new verified samples
 

@@ -9,21 +9,29 @@ from collections import deque
 import json
 from datetime import datetime
 import asyncio
-import aiofiles
+try:
+    import aiofiles
+except ImportError:
+    aiofiles = None
 import threading
 from concurrent.futures import ThreadPoolExecutor
 import functools
 from cachetools import LRUCache
 
-# Import Project Modules
 import sys
 import os
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
+
 # Define Project Root
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(PROJECT_ROOT)
 
 from feature_extractor.flow_features import FlowFeatureExtractor
-from data_pipeline.loader import FeatureAligner
+from data_pipeline.loader import FeatureAligner, DataLoader
 from fusion_engine.fusion import FusionEngine
 from fusion_engine.rule_engine import RuleEngine
 
@@ -37,6 +45,8 @@ class RealTimeDetector:
             self.interface = interface
             
         self.flow_extractor = FlowFeatureExtractor()
+        self.loader_helper = DataLoader(os.path.join(PROJECT_ROOT, "dataset"))
+        self.aligner = FeatureAligner(self.loader_helper.required_features)
         self.fusion_engine = FusionEngine()
         self.rule_engine = RuleEngine()
         
@@ -132,10 +142,12 @@ class RealTimeDetector:
         def load_transformer():
             if os.path.exists(self.trans_path):
                 try:
-                    self.transformer_model = keras.models.load_model(self.trans_path, compile=False)
+                    from models.train_local import TransformerBlock, Attention
+                    with keras.utils.custom_object_scope({'TransformerBlock': TransformerBlock, 'Attention': Attention}):
+                        self.transformer_model = keras.models.load_model(self.trans_path, compile=False)
                     print(f"✅ Loaded Transformer Model from {self.trans_path}")
                 except Exception as e:
-                    print(f"⚠️ Could not load Transformer (Custom Layer issue?): {e}")
+                    print(f"⚠️ Could not load Transformer: {e}")
 
         def load_isolation_forest():
             if os.path.exists(self.iso_path):
@@ -170,24 +182,26 @@ class RealTimeDetector:
                 if self.alert_buffer:
                     alerts_to_log = list(self.alert_buffer)
                     self.alert_buffer.clear()
-                    asyncio.run(self._write_alerts_async(alerts_to_log))
+                    self.loop.run_until_complete(self._write_alerts_async(alerts_to_log))
                 time.sleep(0.1)  # Small delay to prevent busy waiting
             except Exception as e:
                 print(f"Async logging error: {e}")
 
     async def _write_alerts_async(self, alerts):
-        """Asynchronously write alerts to disk."""
+        """Asynchronously write alerts to disk with fallback."""
         try:
-            # Read existing alerts
+            existing_alerts = []
             if os.path.exists(self.log_path):
-                async with aiofiles.open(self.log_path, 'r') as f:
-                    content = await f.read()
-                    if content.strip():
-                        existing_alerts = json.loads(content)
-                    else:
-                        existing_alerts = []
-            else:
-                existing_alerts = []
+                if aiofiles:
+                    async with aiofiles.open(self.log_path, 'r') as f:
+                        content = await f.read()
+                        if content.strip():
+                            existing_alerts = json.loads(content)
+                else:
+                    with open(self.log_path, 'r') as f:
+                        content = f.read()
+                        if content.strip():
+                            existing_alerts = json.loads(content)
 
             # Append new alerts
             existing_alerts.extend(alerts)
@@ -197,8 +211,12 @@ class RealTimeDetector:
                 existing_alerts = existing_alerts[-1000:]
 
             # Write back
-            async with aiofiles.open(self.log_path, 'w') as f:
-                await f.write(json.dumps(existing_alerts, indent=4))
+            if aiofiles:
+                async with aiofiles.open(self.log_path, 'w') as f:
+                    await f.write(json.dumps(existing_alerts, indent=4))
+            else:
+                with open(self.log_path, 'w') as f:
+                    f.write(json.dumps(existing_alerts, indent=4))
 
         except Exception as e:
             print(f"Error writing alerts: {e}")
@@ -222,7 +240,7 @@ class RealTimeDetector:
         """Process a batch of flows for inference."""
         for flow_key, packets in batch_data:
             try:
-                self.analyze_flow(flow_key)
+                self.analyze_flow(flow_key, packets=packets)
                 self.active_flows[flow_key] = []  # Reset after analysis
             except Exception as e:
                 print(f"Error processing batch flow {flow_key}: {e}")
@@ -231,15 +249,14 @@ class RealTimeDetector:
         return {
             "CNN": self.cnn_model is not None,
             "Autoencoder": self.autoencoder is not None,
-            # "Isolation Forest": self.iso_forest is not None,
             "LSTM": self.lstm_model is not None,
             "Transformer": self.transformer_model is not None,
             "Isolation Forest": self.iso_forest is not None
         }
 
     def clear_alerts(self):
-        # Clear active flows
-        self.active_flows = {}
+        # Reinitialise as LRUCache (must preserve the cache interface used elsewhere)
+        self.active_flows = LRUCache(maxsize=self.max_active_flows)
         # Clear log file to start fresh for the new file analysis
         if os.path.exists(self.log_path):
             try:
@@ -307,22 +324,17 @@ class RealTimeDetector:
             self.inference_queue.append((flow_key, self.active_flows[flow_key].copy()))
             # Don't reset here - let batch worker handle it
 
-    def analyze_flow(self, flow_key):
-        packets = self.active_flows.get(flow_key, [])
+    def analyze_flow(self, flow_key, packets=None):
+        if packets is None:
+            packets = self.active_flows.get(flow_key, [])
         if not packets:
             return
 
         # Get last packet for IP info (approximate)
-        # specific packet obj is not stored, but we have flow_key
-        # For logging, we can reconstruct basic info
         src_ip, dst_ip, proto = flow_key
         
-        print(f"DEBUG: Analyzing Flow {src_ip} -> {dst_ip} with {len(packets)} packets")
-        
         features = self.flow_extractor.extract_features(packets)
-        
         if features is None:
-            print("DEBUG: Feature extraction returned None")
             return
             
         try:
@@ -346,11 +358,13 @@ class RealTimeDetector:
             
             if self.scaler:
                  try:
-                     feature_vector = np.array(list(features.values())).reshape(1, -1)
-                     scaled_features = self.scaler.transform(feature_vector)
+                     # Align features to the 70 Gold Standard features expected by model/scaler
+                     raw_df = pd.DataFrame([features])
+                     aligned_df = self.aligner.align(raw_df)
+                     scaled_features = self.scaler.transform(aligned_df)
                  except Exception as e:
-                     print(f"DEBUG: Scaler Transformation Error (likely feature shape mismatch on this pcap): {e}")
-                     # If we can't scale, we can't run ML models. We will rely purely on Rule Score.
+                     print(f"Scaler transform error: {e}")
+                     # Fall back to rule-only scoring when scaling fails
                      pass
                      
             if scaled_features is not None:
@@ -371,7 +385,7 @@ class RealTimeDetector:
                          trans_prob = float(self.transformer_model.predict(trans_input, verbose=0)[0][0])
                          
                  except Exception as e:
-                     print(f"Prediction Error: {e}")
+                     print(f"Model prediction error: {e}")
                      
                  # Autoencoder Anomaly
                  if self.autoencoder:
@@ -384,14 +398,14 @@ class RealTimeDetector:
                      except Exception as e:
                          print(f"Autoencoder Error: {e}")
                          
-             # Isolation Forest Anomaly
-             if self.iso_forest:
-                 try:
-                     iso_pred = self.iso_forest.predict(scaled_features)[0]
-                     if iso_pred == -1:
-                         iso_anomaly = True
-                 except Exception as e:
-                     print(f"Isolation Forest Error: {e}")
+                 # Isolation Forest Anomaly
+                 if self.iso_forest:
+                     try:
+                         iso_pred = self.iso_forest.predict(scaled_features)[0]
+                         if iso_pred == -1:
+                             iso_anomaly = True
+                     except Exception as e:
+                         print(f"Isolation Forest Error: {e}")
 
             # 4. Fusion
             # Simple weighted average of available supervised models
@@ -451,12 +465,18 @@ class RealTimeDetector:
             
     def log_alert(self, alert):
         # Print to Console
-        print(f"🚨 ALERT: {alert['alert_level']} Risk ({alert['risk_score']}) from {alert['src_ip']}")
-        
+        print(f"ALERT: {alert['alert_level']} Risk ({alert['risk_score']}) from {alert['src_ip']}")
+
         # Add to async buffer instead of immediate write
         self.alert_buffer.append(alert)
-        # sniff(iface=self.interface, prn=self.process_packet, store=0)
+
+    def start(self, timeout=None):
+        """Begin live packet capture on the configured interface."""
+        print(f"Starting live capture on {self.interface}...")
+        from scapy.all import sniff
+        sniff(iface=self.interface, prn=self.process_packet, store=0, timeout=timeout)
+
 
 if __name__ == "__main__":
-    detector = RealTimeDetector() # Auto-detect interface
+    detector = RealTimeDetector()  # Auto-detect interface
     detector.start()

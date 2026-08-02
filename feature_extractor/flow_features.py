@@ -1,7 +1,20 @@
 import numpy as np
 from scipy.stats import entropy
 from collections import Counter
-import numba as nb
+
+try:
+    import numba as nb
+    HAS_NUMBA = True
+except ImportError:
+    HAS_NUMBA = False
+    nb = None
+
+def dummy_jit(nopython=True):
+    def decorator(func):
+        return func
+    return decorator
+
+jit_dec = nb.jit if HAS_NUMBA else dummy_jit
 
 class FlowFeatureExtractor:
     """
@@ -12,10 +25,10 @@ class FlowFeatureExtractor:
         pass
 
     @staticmethod
-    @nb.jit(nopython=True)
+    @jit_dec()
     def calculate_entropy_optimized(payload_bytes):
         """
-        Optimized entropy calculation using Numba.
+        Optimized entropy calculation using Numba (or NumPy fallback).
         """
         if len(payload_bytes) == 0:
             return 0.0
@@ -46,7 +59,7 @@ class FlowFeatureExtractor:
         return self.calculate_entropy_optimized(np.frombuffer(payload_bytes, dtype=np.uint8))
 
     @staticmethod
-    @nb.jit(nopython=True)
+    @jit_dec()
     def calculate_iat_stats_optimized(timestamps):
         """
         Optimized IAT calculation using Numba.

@@ -1,4 +1,4 @@
-﻿# 🛡️ Advanced AI-BASED NIDS (Network Intrusion Detection System)
+# 🛡️ Advanced AI-BASED NIDS (Network Intrusion Detection System)
 
 This project is a **Next-Generation Intrusion Detection System** that evolves beyond traditional machine learning approaches. Unlike older systems that rely on simple classifiers, this project utilizes a **Hybrid Architecture** combining Deep Learning (CNNs), Unsupervised Learning (Autoencoders), and Expert Rules to detect sophisticated cyber threats.
 
@@ -56,6 +56,46 @@ The following table highlights why this project is a significant upgrade over th
     ```bash
     streamlit run dashboard/app.py
     ```
+
+---
+
+## ☁️ Google Colab GPU Training (Recommended)
+
+Train all 5 AI models in the cloud for free using a T4 GPU — no local GPU required.
+
+**Notebook**: [`AI_NIDS_Colab_Training.ipynb`](AI_NIDS_Colab_Training.ipynb)
+
+### Quick Start
+1. Upload the notebook to [Google Colab](https://colab.research.google.com)
+2. Enable **T4 GPU**: Runtime → Change runtime type → T4 GPU
+3. Get your Kaggle API key from https://www.kaggle.com/settings → API → **Create New Token**
+4. **Run All Cells** (`Runtime → Run All`) — takes ~30–60 min on T4 GPU
+5. Download `NIDS_Models.zip` when training completes
+6. Extract to `G:/Projects/AI-BASED-NIDS/` and run the dashboard
+
+### What the Notebook Trains
+
+| Model | Type | Description |
+|---|---|---|
+| Residual CNN | Supervised | Skip-connection 1D-CNN for attack classification |
+| Bidirectional LSTM | Supervised | Sequential flow pattern analysis |
+| Transformer | Supervised | Multi-head attention-based detection |
+| Deep Autoencoder | Unsupervised | Benign-only trained, zero-day via reconstruction MSE |
+| Isolation Forest | Unsupervised | 200-tree outlier detection |
+
+### Trained Model Output
+```
+models/
+├── cnn_model.h5                  ← Residual CNN
+├── scaler.joblib                 ← MinMaxScaler (70 features)
+├── autoencoder/
+│   ├── autoencoder.h5
+│   └── threshold.txt             ← 99th-percentile MSE threshold
+├── lstm/lstm_model.h5
+├── transformer/transformer_model.h5
+└── isolation_forest/isolation_forest.joblib
+```
+
 
 5.  **Usage**:
     *   **Live Mode**: Monitors your active network interface.
