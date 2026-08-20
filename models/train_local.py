@@ -153,10 +153,11 @@ class TransformerBlock(layers.Layer):
         self.rate = rate
 
     def call(self, inputs, training=False):
-        attn_output = self.att(inputs, inputs)
+        inputs = tf.cast(inputs, tf.float32)
+        attn_output = tf.cast(self.att(inputs, inputs), tf.float32)
         attn_output = self.dropout1(attn_output, training=training)
         out1 = self.layernorm1(inputs + attn_output)
-        ffn_output = self.ffn(out1)
+        ffn_output = tf.cast(self.ffn(out1), tf.float32)
         ffn_output = self.dropout2(ffn_output, training=training)
         return self.layernorm2(out1 + ffn_output)
         
